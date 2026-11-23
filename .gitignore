@@ -1,0 +1,53 @@
+# Credentials and local setup
+.env
+.env.*
+!**/.env.example
+*.lic
+*.ulf
+*.alf
+*.keystore
+*.jks
+*.p12
+*.pfx
+*.pem
+*.key
+services-config.json
+
+# Unity and build outputs
+/Game/[Ll]ibrary/
+/Game/[Tt]emp/
+/Game/[Oo]bj/
+/Game/[Ll]ogs/
+/Game/[Uu]ser[Ss]ettings/
+/Game/[Mm]emoryCaptures/
+/Game/[Rr]ecordings/
+/Game/[Bb]uild/
+/Game/[Bb]uilds/
+/[Bb]uild/
+/[Bb]uilds/
+/Game/*.csproj
+/Game/*.sln
+/Game/*.slnx
+/Game/sysinfo.txt
+*.user
+*.userprefs
+*.suo
+
+# Optional vendor download
+/Game/Packages/com.tripo3d.unitybridge/
+
+# Tool caches and local editor settings
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+.gradle/
+.vs/
+.idea/
+/.vscode/
+/graphify-out/
+/.validation/
+/test-results/
+/playwright-report/
+.DS_Store
+Thumbs.db

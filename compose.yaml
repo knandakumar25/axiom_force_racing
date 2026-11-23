@@ -1,0 +1,92 @@
+name: axiom-force-racing
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-racing_accounts}
+      POSTGRES_USER: ${POSTGRES_USER:-racing}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+  backend:
+    build:
+      context: ./backend
+      target: dev
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: ${POSTGRES_DB:-racing_accounts}
+      DB_USER: ${POSTGRES_USER:-racing}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5174}
+      CLERK_AUTHORIZED_PARTIES: ${CLERK_AUTHORIZED_PARTIES:-http://localhost:5174}
+    ports:
+      - "127.0.0.1:8001:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8000/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+  website:
+    build: ./website
+    ports:
+      - "127.0.0.1:5174:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+  playwright:
+    profiles: ["test"]
+    build: ./tools/playwright
+    init: true
+    ipc: host
+    environment:
+      BASE_URL: http://website
+    depends_on:
+      - website
+  cutscene:
+    profiles: ["cutscene"]
+    build: ./tools/cutscene
+    volumes:
+      - .:/workspace
+  csharp:
+    profiles: ["tools"]
+    image: mcr.microsoft.com/dotnet/sdk:10.0
+    working_dir: /workspace
+    entrypoint: ["dotnet"]
+    command: ["--info"]
+    volumes:
+      - .:/workspace
+  export:
+    profiles: ["export"]
+    shm_size: 8gb
+    build:
+      context: ./unity
+      args:
+        UNITY_ACCEPT_EDITOR_TERMS: ${UNITY_ACCEPT_EDITOR_TERMS:-}
+    platform: linux/amd64
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    entrypoint: ["/bin/sh", "/workspace/export/export.sh"]
+    environment:
+      GITHUB_ACTIONS: ${GITHUB_ACTIONS:-false}
+    command: ["help"]
+volumes:
+  pgdata:
