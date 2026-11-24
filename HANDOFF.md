@@ -2,7 +2,7 @@
 
 Working directory is D:/Projects/axiom_force_racing. The GitHub repository is configured as origin. No remote HEAD was advertised when checked.
 
-This setup defines separate service ports and storage. The Express base was copied from the existing project at 130f4fb. Game authentication, saves and racing results are future integration work. The website endpoint is a plain-text placeholder until website design is requested.
+This setup defines separate service ports and storage. The Express base was copied from the existing project at 130f4fb. Game authentication, saves and racing results are future integration work. The placeholder has been retired. The shared website serves the race outline.
 
 The installed Windows Unity CLI is 1.0.1. Its registered Editor is 6000.3.29f1. The official Headless Editor container workflow requires Unity 6000.7 or later, Ubuntu Linux x86-64 and a floating license server. The Windows Student license is active. Use the Windows Unity CLI for project creation, editing, Editor tests and launches. The supported container host, floating license and matching Editor versions remain export prerequisites. The Dockerfile pins Unity's documented base image and reference Editor version. Availability of the pinned Editor and modules still needs a live image build after terms acceptance.
 
@@ -31,3 +31,14 @@ On this machine the Unity Package Manager could not verify the registry
 certificate during Pipeline installation. Passing the trusted Windows root
 certificates as a PEM file via process-local NODE_EXTRA_CA_CERTS resolved it.
 TLS validation and machine-wide settings were left intact.
+
+## Shared website (2026-11-23)
+
+The sibling `axiom_force_website` checkout serves Drift Circuit at
+`http://localhost:5173/en/games/drift-circuit`. The racing placeholder
+website and browser image were retired. Run `./tools/website-smoke.ps1`
+against the shared site. Racing Express remains on port 8001 and
+PostgreSQL on port 5433 with the existing volume. The racing Compose
+export profile is unchanged. The shared site connects to the original API.
+
+Racing Compose validation, direct API health, both shared smoke checks and all 182 racing API unit tests passed.

@@ -28,13 +28,13 @@ docker compose up -d --wait
 | --- | --- |
 | PostgreSQL | `127.0.0.1:5433`, with a separate Compose data volume |
 | Express API | `http://localhost:8001/api/health` |
-| Development website | `http://localhost:5174`, with `/api/` proxied to Express |
+| Shared player website | [http://localhost:5173](http://localhost:5173), started from the sibling website checkout |
 | Backend tests | `docker compose exec -T backend npm test` |
-| Browser smoke test | `docker compose run --rm playwright` |
+| Browser smoke test | `./tools/website-smoke.ps1` |
 | Standalone C# tools | `docker compose run --rm csharp --info` |
 | Python and FFmpeg | Opt-in `cutscene` service |
 
-The website is a placeholder endpoint. The Express service provides the accounts and save API foundation. Unity integration with that API is future work. PostgreSQL is accessed through the API for game data.
+Start the shared site with `../axiom_force_website/start.ps1`. It serves the Drift Circuit outline and uses the original game accounts API. The racing API and database are separate and reserved for local development. Racing browser sign-in and online features remain future work. The Express service provides the accounts and save API foundation. Unity integration with that API is future work. PostgreSQL is accessed through the API for game data.
 
 ## Exports
 
@@ -48,8 +48,7 @@ The export setup still needs a working official Unity image pull, a supported Li
 | --- | --- |
 | `Game/` | Unity assets, packages and project settings |
 | `backend/` | Express API, SQL migrations and tests |
-| `website/` | Development website and API proxy |
-| `tools/` | Playwright smoke test and media tooling |
+| `tools/` | Shared website smoke launcher and media tooling |
 | `unity/` and `export/` | Headless Editor image recipe and opt-in exporter |
 | `AGENTS.md` and agent-specific instructions | Project workflows and rules |
 | `HANDOFF.md` and `MEMORY.MD` | Current setup and decisions |

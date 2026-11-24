@@ -29,3 +29,12 @@
 - Expanded the Drift Circuit outline to eight candidate tracks across City and Skyline Cups. Added six potential items, a three-item prototype and rules for pickup placement, counterplay and time trials. Documentation only. No tracks, game assets or exports were created.
 
 - Prepared the initial GitHub push with scoped Unity ignore rules, build-context allowlists and a README covering project status, local setup, plugins, services and export gates.
+
+## Shared website (2026-11-23)
+
+The sibling `axiom_force_website` checkout serves Drift Circuit at
+`http://localhost:5173/en/games/drift-circuit`. The racing placeholder
+website and browser image were retired. Run `./tools/website-smoke.ps1`
+against the shared site. Racing Express remains on port 8001 and
+PostgreSQL on port 5433 with the existing volume. The racing Compose
+export profile is unchanged. The shared site connects to the original API.
