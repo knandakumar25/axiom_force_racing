@@ -373,10 +373,208 @@ public sealed class TimeTrialPlayTests
         Assert.That(Label("Checkpoint delta").text, Does.StartWith("PB"));
     }
 
+    /// <summary>Checks the signals and actual collider at the clock boundaries with and without an occupying kart.</summary>
+    [UnityTest]
+    public IEnumerator RustrailCrossingFollowsFixedStepsAndBlocksOnlyTheBranch()
+    {
+        yield return SelectRustrail();
+        AssertCrossing("OPEN", false);
+        yield return new WaitUntil(() => trial.Rules.Phase == TrialPhase.Racing);
+        yield return WaitForRaceTime(11.98);
+        AssertCrossing("OPEN", false);
+        yield return WaitForRaceTime(12);
+        AssertCrossing("CLOSING", false);
+
+        yield return PressPad(GamepadButton.Start);
+        Assert.That(trial.Rules.Phase, Is.EqualTo(TrialPhase.Paused));
+        double paused = trial.Rules.Elapsed;
+        yield return new WaitForSecondsRealtime(0.2f);
+        Assert.That(trial.Rules.Elapsed, Is.EqualTo(paused));
+        AssertCrossing("CLOSING", false);
+        yield return PressPad(GamepadButton.Start);
+
+        // Only the nose overlaps the blocking volume at the closure boundary.
+        PlaceForCrossingCheck(new(-90, 0.52f, -10.7f), Vector3.back);
+        yield return WaitForRaceTime(15);
+        AssertCrossing("CLOSING", false);
+        yield return new WaitForFixedUpdate();
+        AssertCrossing("CLOSING", false);
+        PlaceForCrossingCheck(new(-90, 0.52f, -7), Vector3.back);
+        yield return new WaitForFixedUpdate();
+        AssertCrossing("CLOSED", true);
+        for (int side = -1; side <= 1; side += 2)
+        {
+            Vector3 end = RailCrossing.BarrierCenter + new Vector3(3.6f * side, -0.25f, 0);
+            Collider[] meeting = Physics.OverlapBox(end, Vector3.one * 0.05f);
+            Assert.That(System.Array.Exists(meeting, collider => collider.name == "Barrier"), Is.True,
+                $"The crossing must meet the rail at its {side} end.");
+        }
+
+        for (int side = -1; side <= 1; side += 2)
+        {
+            PlaceForCrossingCheck(new(-90, 0.52f, -12 + side * 5), Vector3.back * side);
+            Pad(new GamepadState { rightTrigger = 1 });
+            yield return new WaitForSeconds(1.25f);
+            float gap = (trial.KartBody.position.z + 12) * side;
+            Assert.That(gap, Is.InRange(1.30f, 1.65f),
+                $"Kart did not stop at the solid barrier from side {side}.");
+        }
+
+        PlaceForCrossingCheck(new(-66, 0.52f, 5.67f), new(24, 0, 4));
+        yield return new WaitForSeconds(1.25f);
+        Pad(default);
+        Assert.That(trial.KartBody.position.x, Is.GreaterThan(-58f));
+        AssertCrossing("CLOSED", true);
+        yield return WaitForRaceTime(24);
+        AssertCrossing("OPEN", false);
+
+        // A kart still on the barrier at wraparound never gets trapped by a deferred closure.
+        yield return WaitForRaceTime(38.9);
+        PlaceForCrossingCheck(new(-90, 0.52f, -12), Vector3.back);
+        yield return WaitForRaceTime(39);
+        AssertCrossing("CLOSING", false);
+        yield return WaitForRaceTime(48);
+        AssertCrossing("OPEN", false);
+        PlaceForCrossingCheck(new(-90, 0.52f, -7), Vector3.back);
+        yield return WaitForRaceTime(63);
+        AssertCrossing("CLOSED", true);
+        yield return PressPad(GamepadButton.Start);
+        yield return PressPad(GamepadButton.South);
+        Assert.That(trial.Rules.Phase, Is.EqualTo(TrialPhase.Countdown));
+        Assert.That(trial.Rules.Elapsed, Is.Zero);
+        AssertCrossing("OPEN", false);
+    }
+
+    /// <summary>Drives both Rustrail routes, then verifies record isolation, ghost replay and shortcut reset.</summary>
+    [UnityTest, Timeout(180000)]
+    public IEnumerator VirtualGamepadCompletesRustrailSwitchbackCrossingSwitchback()
+    {
+        var otherRecords = new System.Collections.Generic.Dictionary<string, byte[]>();
+        foreach (CourseDefinition circuit in CourseDefinition.All)
+        {
+            if (circuit == CourseDefinition.Rustrail)
+                continue;
+            SeedGhost(circuit);
+            string path = Path.Combine(recordDirectory, circuit.Id + "-r1.json");
+            otherRecords.Add(path, File.ReadAllBytes(path));
+        }
+        yield return SelectRustrail();
+        yield return new WaitUntil(() => trial.Rules.Phase == TrialPhase.Racing);
+        yield return DriveLap(false, 1);
+        yield return DriveLap(true, 2);
+        yield return DriveLap(false, 3);
+        Assert.That(trial.Rules.Phase, Is.EqualTo(TrialPhase.Finished));
+        double elapsed = trial.Rules.Elapsed;
+        double splitTotal = 0;
+        for (int lap = 0; lap < TrialRules.LapCount; lap++)
+        {
+            Assert.That(trial.Rules.LapSplit(lap), Is.Positive);
+            splitTotal += trial.Rules.LapSplit(lap);
+        }
+        Assert.That(splitTotal, Is.EqualTo(elapsed).Within(0.001));
+
+        Assert.That(File.Exists(Path.Combine(recordDirectory, "rustrail-junction-r1.json")), Is.True);
+        TrialRecord saved = new TrialRecordStore(recordDirectory).Load(CourseDefinition.Rustrail);
+        Assert.That(saved, Is.Not.Null);
+        Assert.That(saved.BestTotal, Is.EqualTo(elapsed).Within(0.00001));
+        Assert.That(saved.Checkpoints, Has.Length.EqualTo(12));
+        for (int i = 1; i < saved.Checkpoints.Length; i++)
+            Assert.That(saved.Checkpoints[i], Is.GreaterThan(saved.Checkpoints[i - 1]));
+        Assert.That(System.Array.Exists(saved.Poses, pose => pose.Reset), Is.False);
+        double first = saved.Checkpoints[3] - saved.Checkpoints[2];
+        double crossing = saved.Checkpoints[7] - saved.Checkpoints[6];
+        double last = saved.Checkpoints[11] - saved.Checkpoints[10];
+        Assert.That(crossing, Is.LessThan(System.Math.Min(first, last)));
+        foreach (var record in otherRecords)
+            Assert.That(File.ReadAllBytes(record.Key), Is.EqualTo(record.Value));
+        Debug.Log($"Rustrail Junction finished in {elapsed:F2}s. Crossing Approach to Finish: " +
+            $"switchback {first:F2}s, crossing {crossing:F2}s, switchback {last:F2}s.");
+
+        yield return null;
+        Assert.That(Label("Details").text, Does.Contain("Lap 1").And.Contain("Lap 2").And.Contain("Lap 3"));
+        Assert.That(EventSystem.current.currentSelectedGameObject.name, Is.EqualTo("Retry"));
+        yield return PressPad(GamepadButton.South);
+        Assert.That(trial.Rules.Phase, Is.EqualTo(TrialPhase.Countdown));
+        AssertCrossing("OPEN", false);
+        yield return new WaitUntil(() => trial.Rules.Elapsed > 0.2);
+        Transform ghost = trial.transform.Find("Rustrail Junction/Personal best ghost");
+        Assert.That(ghost.gameObject.activeSelf, Is.True);
+        Assert.That(ghost.position.x, Is.GreaterThan(CourseDefinition.Rustrail.Start.x));
+
+        yield return DriveLap(true, 1, stopOnRoute: true);
+        Assert.That(trial.Rules.LastGate, Is.EqualTo(2));
+        double beforeReset = trial.Rules.Elapsed;
+        AssertCrossing("CLOSING", false);
+        yield return PressPad(GamepadButton.North);
+        yield return new WaitForFixedUpdate();
+        var respawn = CourseDefinition.Rustrail.Respawn(2);
+        Assert.That(Vector3.Distance(trial.KartBody.position, respawn.Position), Is.LessThan(0.25f));
+        Assert.That(Vector3.Angle(trial.KartBody.rotation * Vector3.forward, respawn.Forward), Is.LessThan(1f));
+        Assert.That(trial.Rules.Elapsed, Is.GreaterThan(beforeReset));
+        Assert.That(trial.Rules.LastGate, Is.EqualTo(2));
+        Assert.That(trial.Rules.NextGate, Is.EqualTo(3));
+        Assert.That(trial.Rules.Laps, Is.Zero);
+        AssertCrossing("CLOSING", false);
+    }
+
+    /// <summary>Opens Rustrail through the startup menu with the virtual gamepad.</summary>
+    private IEnumerator SelectRustrail()
+    {
+        yield return LoadScene(TimeTrial.MenuScenePath);
+        for (int i = 0; i < 3; i++)
+            yield return PressPad(GamepadButton.DpadDown);
+        yield return PressPad(GamepadButton.South);
+        Assert.That(trial.Circuit, Is.SameAs(CourseDefinition.Rustrail));
+    }
+
+    /// <summary>Gives the input system time to receive a button press and release.</summary>
+    private IEnumerator PressPad(GamepadButton button)
+    {
+        Pad(new GamepadState().WithButton(button));
+        yield return null;
+        yield return null;
+        Pad(default);
+        yield return null;
+    }
+
+    /// <summary>Waits for the runtime's millisecond boundary through real physics ticks.</summary>
+    private IEnumerator WaitForRaceTime(double elapsed)
+    {
+        // Fixed steps originate as floats and can land a fraction of a millisecond below the target.
+        while (trial.Rules.Elapsed + 0.0005 < elapsed)
+            yield return new WaitForFixedUpdate();
+    }
+
+    /// <summary>Reads the live advance sign from the scene.</summary>
+    private string CrossingState() =>
+        trial.transform.Find("Rustrail Junction/Advance signal state").GetComponent<TextMesh>().text;
+
+    /// <summary>Checks that both signs and the barrier agree about the phase.</summary>
+    private void AssertCrossing(string state, bool solid)
+    {
+        Transform course = trial.transform.Find("Rustrail Junction");
+        TextMesh entrance = course.Find("Entrance signal state").GetComponent<TextMesh>();
+        Assert.That(CrossingState(), Is.EqualTo(state), $"Race time: {trial.Rules.Elapsed:F3}");
+        Assert.That(entrance.text, Is.EqualTo(state));
+        Assert.That(entrance.color, Is.EqualTo(course.Find("Advance signal state").GetComponent<TextMesh>().color));
+        BoxCollider barrier = course.Find("Crossing barrier").GetComponent<BoxCollider>();
+        Assert.That(barrier.enabled && barrier.gameObject.activeInHierarchy, Is.EqualTo(solid));
+    }
+
+    /// <summary>Stages a collision case without registering a checkpoint crossing or changing the race clock.</summary>
+    private void PlaceForCrossingCheck(Vector3 position, Vector3 forward)
+    {
+        Rigidbody body = trial.KartBody;
+        body.position = position;
+        body.rotation = Quaternion.LookRotation(forward);
+        body.linearVelocity = body.angularVelocity = Vector3.zero;
+        trial.Rules.Rebase(position);
+    }
+
     [UnityTest]
     public IEnumerator AllTrackSelectControlsAreReachable()
     {
-        string[] names = { "Little Tokyo–Skyport", "Concrete Wards Viaduct", "Stratos Docks", "Ghost" };
+        string[] names = { "Little Tokyo–Skyport", "Concrete Wards Viaduct", "Stratos Docks", "Rustrail Junction", "Ghost" };
         for (int device = 0; device < 2; device++)
         {
             yield return LoadScene(TimeTrial.MenuScenePath);
@@ -556,10 +754,15 @@ public sealed class TimeTrialPlayTests
     {
         Vector3[] line = TrialCourse.DrivingLine(trial.Circuit, shortcut);
         bool docks = trial.Circuit == CourseDefinition.Docks;
+        bool rustrail = trial.Circuit == CourseDefinition.Rustrail;
+        bool alignRustrail = rustrail && (shortcut || lap == 1);
+        double departure = shortcut ? 8.25 : 15.2;
+        bool aligned = false;
+        bool passedClosedFork = false;
         int segment = 0;
         bool usedRoute = false;
         float waterfrontSpeed = 0f;
-        double cutoff = trial.Rules.Elapsed + (docks ? 65 : 47);
+        double cutoff = trial.Rules.Elapsed + (rustrail ? 90 : docks ? 65 : 47);
         while (trial.Rules.Laps < lap && trial.Rules.Elapsed < cutoff)
         {
             if (stopOnRoute && usedRoute)
@@ -593,6 +796,21 @@ public sealed class TimeTrialPlayTests
             Vector3 forward = body.rotation * Vector3.forward;
             float angle = Vector3.SignedAngle(forward, target - position, Vector3.up);
             float speed = Vector3.Dot(body.linearVelocity, forward);
+            if (alignRustrail && !aligned && trial.Rules.NextGate == 2 && position.z < 56f)
+            {
+                Assert.That(position.z, Is.GreaterThan(43f), "The wait must finish before the timing gate.");
+                if (speed > 0.45f)
+                    Pad(new GamepadState { leftTrigger = 1f });
+                else
+                {
+                    Pad(default);
+                    // Reach the branch during its warning or take the switchback with the barrier down.
+                    double cycle = trial.Rules.Elapsed % 24;
+                    aligned = cycle >= departure && cycle < departure + 0.1;
+                }
+                yield return new WaitForFixedUpdate();
+                continue;
+            }
             bool waterfront = docks && position.z < -60f && position.x is > 0f and < 49f;
             if (waterfront)
                 waterfrontSpeed = Mathf.Max(waterfrontSpeed, speed);
@@ -603,7 +821,22 @@ public sealed class TimeTrialPlayTests
                 rightTrigger = Mathf.Clamp01(desiredSpeed / 25f + (desiredSpeed - speed) * 0.16f),
                 leftTrigger = speed > desiredSpeed + 2.1f ? 0.75f : 0
             });
-            if (docks)
+            if (rustrail)
+            {
+                if (!shortcut && lap == 1 && !passedClosedFork && trial.Rules.NextGate == 3 && position.z < 20f)
+                {
+                    AssertCrossing("CLOSED", true);
+                    passedClosedFork = true;
+                }
+                Vector3 branchPoint = shortcut ? new(-90, 0, -12) : new(-46, 0, -2);
+                if (!usedRoute && (position - branchPoint).sqrMagnitude < 9f && body.position.y > 0.3f)
+                {
+                    usedRoute = true;
+                    if (shortcut)
+                        Assert.That(CrossingState(), Is.EqualTo("CLOSING"));
+                }
+            }
+            else if (docks)
             {
                 Vector3 branchPoint = shortcut ? new(-91, 0, -12) : new(-61, 0, -12);
                 usedRoute |= (position - branchPoint).sqrMagnitude < 9f && body.position.y > 0.3f;
@@ -620,6 +853,8 @@ public sealed class TimeTrialPlayTests
         Assert.That(trial.Rules.Laps, Is.EqualTo(lap),
             $"Lap {lap}, shortcut {shortcut}, segment {segment}/{line.Length}, kart {trial.KartBody.position}, gate {trial.Rules.NextGate}.");
         Assert.That(usedRoute, Is.True, $"Lap {lap} missed its route witness (shortcut {shortcut}).");
+        if (rustrail && !shortcut && lap == 1)
+            Assert.That(passedClosedFork, Is.True);
         if (docks)
         {
             Assert.That(waterfrontSpeed, Is.GreaterThanOrEqualTo(22f));

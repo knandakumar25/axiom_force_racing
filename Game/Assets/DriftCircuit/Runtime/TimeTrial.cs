@@ -204,6 +204,7 @@ namespace DriftCircuit
                 CapturePose(reset: true);
             }
 
+            course.UpdateCrossing(Rules.Elapsed, kart);
             Vector3 groundProbe = kart.Body.position - Vector3.up * 0.20f;
             bool grounded = Physics.Raycast(groundProbe, Vector3.down, 0.55f, 1 << 0, QueryTriggerInteraction.Ignore);
             kart.Step(input.Throttle.ReadValue<float>(), input.Brake.ReadValue<float>(),
@@ -274,6 +275,7 @@ namespace DriftCircuit
             poses.Clear();
             Rules.Restart(Circuit.Start);
             PlaceKart(Circuit.Start, Circuit.StartForward);
+            course.UpdateCrossing(Rules.Elapsed, kart);
             ghost.Refresh(null, 0, 0, false);
             kart.Body.isKinematic = true;
             course.ShowExpected(0);
@@ -340,7 +342,7 @@ namespace DriftCircuit
                 tire.GetComponent<Renderer>().sharedMaterial = rubber;
                 tire.GetComponent<Collider>().enabled = false;
             }
-            kart = new TrialKart(body);
+            kart = new TrialKart(body, collider);
         }
 
         private Material GhostMaterial()

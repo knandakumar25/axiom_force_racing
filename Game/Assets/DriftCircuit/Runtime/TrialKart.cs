@@ -7,6 +7,7 @@ namespace DriftCircuit
     {
         private const float BoostDuration = 1f;
         private const float NormalSpeed = 25f;
+        private readonly BoxCollider collider;
         private float charge;
         private float boost;
         private bool driftAllowed;
@@ -18,7 +19,29 @@ namespace DriftCircuit
         public float ForwardSpeed => Vector3.Dot(Body.linearVelocity, Body.rotation * Vector3.forward);
 
         /// <summary>Wraps the scene's interpolated kart body.</summary>
-        public TrialKart(Rigidbody body) => Body = body;
+        public TrialKart(Rigidbody body, BoxCollider collider)
+        {
+            Body = body;
+            this.collider = collider;
+        }
+
+        // The chase view uses interpolation. The crossing needs the current physics pose,
+        // including a reset performed in this same fixed step.
+        internal Bounds PhysicsBounds
+        {
+            get
+            {
+                Quaternion rotation = Body.rotation;
+                Vector3 size = collider.size;
+                Vector3 x = rotation * Vector3.right * size.x;
+                Vector3 y = rotation * Vector3.up * size.y;
+                Vector3 z = rotation * Vector3.forward * size.z;
+                return new Bounds(Body.position + rotation * collider.center, new Vector3(
+                    Mathf.Abs(x.x) + Mathf.Abs(y.x) + Mathf.Abs(z.x),
+                    Mathf.Abs(x.y) + Mathf.Abs(y.y) + Mathf.Abs(z.y),
+                    Mathf.Abs(x.z) + Mathf.Abs(y.z) + Mathf.Abs(z.z)));
+            }
+        }
 
         /// <summary>Discards an unfinished drift when its control is released in a paused trial.</summary>
         public void CancelDrift()

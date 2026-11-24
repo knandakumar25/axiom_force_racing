@@ -9,8 +9,11 @@ The offline time trial runs for three laps on any of these circuits.
 | Little Tokyo–Skyport | Market and Skyport loop or maintenance shortcut |
 | Concrete Wards Viaduct | Viaduct boulevard or service tunnel |
 | Stratos Docks | Inland loading-yard bend or narrow quay shortcut |
+| Rustrail Junction | Always-open switchback or timed rail crossing |
 
 Stratos Docks opens eastbound on a flat waterfront straight. Follow East Pier through the loading-yard chicane, take the westbound back straight to Quay Approach, then choose a route to the shared finish. Cross-road stripes mark the chicane braking zone. Amber dashes lead to the quay entrance.
+
+Rustrail Junction is the final City Cup circuit. Follow Rail Yard, Signal Approach, and Crossing Approach before choosing the left-hand switchback or the right-hand crossing. From GO, the crossing repeats a 24-second cycle. **OPEN** lasts 12 seconds, **CLOSING** warns for 3 seconds while the lane is still passable, and **CLOSED** lasts through the end of the cycle. The barrier waits for a kart occupying its path. Pausing freezes the timer, Retry opens the crossing for a new attempt, and Reset returns to the last checkpoint without restarting the cycle.
 
 ## Play the time trial
 
@@ -42,9 +45,9 @@ unity command --project-path ./Game test run --mode all --async-tests true
 unity command --project-path ./Game test status
 ```
 
-The Play Mode suite uses virtual keyboard, gamepad and mouse input. It drives each circuit through the main route, shortcut, and main route over three laps. It checks that all three rows and Ghost are reachable, and that a Docks retry loads the saved ghost while the other circuit records stay independent. The Docks race requires at least 22 m/s on the waterfront and compares the yard and quay times from Quay Approach to Finish.
+The Play Mode suite uses virtual keyboard, gamepad and mouse input. It drives each circuit through the main route, shortcut, and main route over three laps and checks access to all four circuit rows and Ghost. The Docks race requires at least 22 m/s on the waterfront and compares the yard and quay times from Quay Approach to Finish. Rustrail tests cover the crossing schedule, the branch barrier, checkpoint recovery, the timed route comparison, and ghost playback after Retry.
 
-The Windows Unity CLI passed 8 Edit Mode and 7 Play Mode tests with zero new Console errors or warnings. The Docks kart reached 25.0 m/s on each lap. The quay saved 3.14 seconds in the timed run, and a reset from inside the quay returned the kart to the shared approach with Finish still next.
+The final Windows Unity CLI run passed 9 Edit Mode and 9 Play Mode tests with zero new Console errors or warnings. Rustrail's virtual gamepad run finished in 171.72 seconds. From Crossing Approach to Finish, the crossing took 15.40 seconds and each switchback took 20.74 seconds. Chase captures showed the advance signal from 34 metres before the fork at 43 km/h, a pass through the crossing during CLOSING, and an open switchback with the barrier down. Retry replayed the saved Rustrail ghost. The other three record files matched their starting contents.
 
 ## Local setup
 

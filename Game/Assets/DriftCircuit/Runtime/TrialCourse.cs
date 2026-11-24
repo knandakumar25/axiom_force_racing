@@ -12,6 +12,10 @@ namespace DriftCircuit
         private readonly List<Object> owned;
         private readonly Material road, shortcut, rail, cyan, amber, white, dark;
         private readonly Material[] gateMaterials;
+        private RailCrossing crossing;
+
+        /// <summary>Parents the crossing labels alongside the generated road and signs.</summary>
+        internal Transform Root => root;
 
         /// <summary>Creates shared materials and records them for scene teardown.</summary>
         public TrialCourse(CourseDefinition definition, Transform root, List<Object> owned)
@@ -56,6 +60,15 @@ namespace DriftCircuit
                 };
                 Cube(landmark.Name, landmark.Position, landmark.Scale, Quaternion.Euler(0, landmark.Yaw, 0), material, landmark.Solid);
             }
+            if (definition == CourseDefinition.Rustrail)
+                crossing = new RailCrossing(this, dark, rail);
+        }
+
+        /// <summary>Applies the crossing phase when this circuit has a timed shortcut.</summary>
+        internal void UpdateCrossing(double elapsed, TrialKart kart)
+        {
+            if (crossing != null)
+                crossing.Update(elapsed, kart.PhysicsBounds);
         }
 
         /// <summary>Lights the next valid gate while leaving the other markers visible.</summary>

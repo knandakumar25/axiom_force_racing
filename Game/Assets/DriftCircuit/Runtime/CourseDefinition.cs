@@ -104,7 +104,37 @@ namespace DriftCircuit
                 new("Finish", new(0, 0, -64), Vector3.right, 7.7f)
             }, DocksMain, DocksQuay, 3, "Loading yard", "Quay shortcut", DocksLandmarks());
 
-        public static readonly CourseDefinition[] All = { Tokyo, Viaduct, Docks };
+        private static readonly Station[] RustrailMain =
+        {
+            new(0, -73, 7), new(58, -73, 7), new(78, -58, 7),
+            new(84, -34, 7), new(84, 26, 7), new(70, 55, 7),
+            new(42, 76, 7), new(-64, 76, 7), new(-84, 63, 7),
+            new(-84, 20, 7), new(-84, 13, 7), new(-76, 4, 6),
+            new(-52, 8, 6), new(-44, -2, 6), new(-52, -16, 6),
+            new(-68, -17, 6), new(-72, -27, 6), new(-84, -38, 7),
+            new(-84, -46, 7), new(-84, -57, 7), new(-69, -73, 7),
+            new(-45, -73, 7)
+        };
+
+        private static readonly Station[] RustrailCrossing =
+        {
+            new(-84, 20, 3.6f), new(-90, 7, 3.6f), new(-90, -29, 3.6f),
+            new(-84, -46, 3.6f), new(-84, -52, 3.6f)
+        };
+
+        /// <summary>Defines the shared checkpoint loop and its timed crossing.</summary>
+        public static readonly CourseDefinition Rustrail = new(
+            "rustrail-junction", "Rustrail Junction", 1, new(4, 0.58f, -73), Vector3.right,
+            new Checkpoint[]
+            {
+                new("Rail Yard", new(84, 0, -5), Vector3.forward, 6.7f),
+                new("Signal Approach", new(-16, 0, 76), Vector3.left, 6.7f),
+                new("Crossing Approach", new(-84, 0, 43), Vector3.back, 6.7f),
+                new("Finish", new(0, 0, -73), Vector3.right, 6.7f)
+            }, RustrailMain, RustrailCrossing, 3, "Switchback", "Rail crossing",
+            new Landmark[] { new("Rail yard foundation", new(0, -3, 0), new(224, 1, 189), Surface.Dark) });
+
+        public static readonly CourseDefinition[] All = { Tokyo, Viaduct, Docks, Rustrail };
 
         public readonly string Id, Name, MainName, ShortcutName;
         public readonly int Revision, ShortcutRejoin;

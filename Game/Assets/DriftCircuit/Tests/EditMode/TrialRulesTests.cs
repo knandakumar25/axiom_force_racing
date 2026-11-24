@@ -11,6 +11,24 @@ public sealed class TrialRulesTests
         new("Finish", new Vector3(0, 0, 20), Vector3.forward, 3)
     };
 
+    /// <summary>Checks both sides of the phase boundaries and the recurring cycle.</summary>
+    [Test]
+    public void CrossingScheduleRoundsToMillisecondsBeforeWrapping()
+    {
+        Assert.That(RailCrossing.ScheduledPhase(0), Is.EqualTo(CrossingPhase.Open));
+        Assert.That(RailCrossing.ScheduledPhase(11.99949), Is.EqualTo(CrossingPhase.Open));
+        Assert.That(RailCrossing.ScheduledPhase(11.9995), Is.EqualTo(CrossingPhase.Closing));
+        Assert.That(RailCrossing.ScheduledPhase(12), Is.EqualTo(CrossingPhase.Closing));
+        Assert.That(RailCrossing.ScheduledPhase(14.99949), Is.EqualTo(CrossingPhase.Closing));
+        Assert.That(RailCrossing.ScheduledPhase(15), Is.EqualTo(CrossingPhase.Closed));
+        Assert.That(RailCrossing.ScheduledPhase(23.99949), Is.EqualTo(CrossingPhase.Closed));
+        Assert.That(RailCrossing.ScheduledPhase(23.9995), Is.EqualTo(CrossingPhase.Open));
+        Assert.That(RailCrossing.ScheduledPhase(24), Is.EqualTo(CrossingPhase.Open));
+        Assert.That(RailCrossing.ScheduledPhase(36), Is.EqualTo(CrossingPhase.Closing));
+        Assert.That(RailCrossing.ScheduledPhase(39), Is.EqualTo(CrossingPhase.Closed));
+        Assert.That(RailCrossing.ScheduledPhase(48), Is.EqualTo(CrossingPhase.Open));
+    }
+
     /// <summary>Rejects wrong order, reverse, out-of-width and duplicate motion.</summary>
     [Test]
     public void OnlyAcceptsForwardCrossingOfExpectedGate()
