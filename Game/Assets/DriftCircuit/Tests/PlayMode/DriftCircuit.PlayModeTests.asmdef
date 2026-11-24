@@ -1,0 +1,5 @@
+{
+    "name": "DriftCircuit.PlayModeTests",
+    "references": ["DriftCircuit", "Unity.InputSystem"],
+    "optionalUnityReferences": ["TestAssemblies"]
+}

@@ -1,0 +1,6 @@
+{
+    "name": "DriftCircuit.EditModeTests",
+    "references": ["DriftCircuit"],
+    "includePlatforms": ["Editor"],
+    "optionalUnityReferences": ["TestAssemblies"]
+}
