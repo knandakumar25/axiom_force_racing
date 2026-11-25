@@ -4,7 +4,7 @@ using UnityEngine;
 namespace DriftCircuit
 {
     /// <summary>The single internal Docks inventory slot; never serialized into trial records.</summary>
-    internal enum RaceItem { None, RelayBoost, FluxRibbon, PulseShield, SignalTap, SlipstreamLink }
+    internal enum RaceItem { None, RelayBoost, FluxRibbon, PulseShield, SignalTap, SlipstreamLink, RouteBeacon }
 
     /// <summary>Runs ribbon placement, straight-ahead signal pulses, slipstream cones, swept contacts, and prediction.</summary>
     internal sealed class RaceItems
@@ -59,10 +59,14 @@ namespace DriftCircuit
         internal IReadOnlyList<Ribbon> Ribbons => ribbons;
         internal IReadOnlyList<SignalPulse> Pulses => pulses;
 
+        private readonly double clockOffset;
+        private CourseDefinition activeCircuit = CourseDefinition.Docks;
+
         /// <summary>Optional course supplies shared primitive materials; pure rule tests need no visuals.</summary>
-        internal RaceItems(TrialCourse course = null)
+        internal RaceItems(TrialCourse course = null, CourseDefinition circuit = null)
         {
             this.course = course;
+            activeCircuit = circuit ?? CourseDefinition.Docks;
             if (course == null) return;
             dormant = course.Paint(0x704383, true);
             armed = course.Paint(0xf04be8, true);
@@ -104,6 +108,7 @@ namespace DriftCircuit
             if (kart.HeldItem == RaceItem.RelayBoost) return kart.TryUseRelayBoost(grounded, brake);
             if (kart.HeldItem == RaceItem.PulseShield) return kart.TryUseShield();
             if (kart.HeldItem == RaceItem.SlipstreamLink) return kart.TryUseSlipstream();
+            if (kart.HeldItem == RaceItem.RouteBeacon) return kart.TryUseRouteBeacon();
             if (kart.HeldItem == RaceItem.SignalTap)
             {
                 Vector3 tapForward = kart.Body.rotation * Vector3.forward;
@@ -118,7 +123,7 @@ namespace DriftCircuit
                 return true;
             }
             if (kart.HeldItem != RaceItem.FluxRibbon || !grounded || brake > 0.02f ||
-                kart.ForwardSpeed <= 4.000001f || !TryPlacement(kart, out Vector3 center, out Vector3 forward)) return false;
+                kart.ForwardSpeed <= 4.000001f || !TryPlacement(kart, activeCircuit, out Vector3 center, out Vector3 forward)) return false;
             foreach (Ribbon patch in ribbons)
                 if (Live(patch) && patch.Owner == kart) return false;
             var ribbon = new Ribbon(kart, center, forward, clock);
@@ -135,26 +140,44 @@ namespace DriftCircuit
             return true;
         }
 
-        /// <summary>Requires a shared straight and measures the entire patch against every protected pose.</summary>
-        internal static bool TryPlacement(TrialKart kart, out Vector3 center, out Vector3 forward)
+        /// <summary>Requires a shared straight on Stratos Docks and measures against protected poses.</summary>
+        internal static bool TryPlacement(TrialKart kart, out Vector3 center, out Vector3 forward) =>
+            TryPlacement(kart, CourseDefinition.Docks, out center, out forward);
+
+        /// <summary>Requires a shared straight on the active circuit and measures the entire patch against protected poses.</summary>
+        internal static bool TryPlacement(TrialKart kart, CourseDefinition circuit, out Vector3 center, out Vector3 forward)
         {
             Vector3 position = kart.Body.position;
-            bool east = Mathf.Abs(position.z + 64f) <= 4.5f &&
-                (position.x is >= -50f and <= -20f or >= 20f and <= 50f);
-            bool west = Mathf.Abs(position.z - 62f) <= 4.5f && position.x is >= -40f and <= 30f;
+            bool east, west;
+            if (circuit == CourseDefinition.Tokyo)
+            {
+                east = Mathf.Abs(position.z + 38f) <= 3.5f && position.x is >= -45f and <= -18f or >= 8f and <= 22f;
+                west = Mathf.Abs(position.z - 49f) <= 4.0f && position.x is >= -42f and <= 26f;
+            }
+            else if (circuit == CourseDefinition.Viaduct)
+            {
+                east = Mathf.Abs(position.z + 40f) <= 4.0f && position.x is >= -48f and <= -18f or >= 8f and <= 30f;
+                west = Mathf.Abs(position.z - 64f) <= 4.2f && position.x is >= -40f and <= 28f;
+            }
+            else
+            {
+                east = Mathf.Abs(position.z + 64f) <= 4.5f &&
+                    (position.x is >= -50f and <= -20f or >= 20f and <= 50f);
+                west = Mathf.Abs(position.z - 62f) <= 4.5f && position.x is >= -40f and <= 30f;
+            }
             forward = east ? Vector3.right : Vector3.left;
             center = position - forward * 3.8f;
             center.y = 0f;
             if ((!east && !west) || Vector3.Angle(kart.Body.rotation * Vector3.forward, forward) > 5f) return false;
-            CourseDefinition docks = CourseDefinition.Docks;
-            foreach (Checkpoint checkpoint in docks.Gates)
+            CourseDefinition targetCircuit = circuit ?? CourseDefinition.Docks;
+            foreach (Checkpoint checkpoint in targetCircuit.Gates)
                 if (DistanceToPatch(center, checkpoint.Center) < 12f) return false;
-            Vector3 gridSide = Vector3.Cross(Vector3.up, docks.StartForward) * TrialRival.GridOffset;
-            if (DistanceToPatch(center, docks.Start + gridSide) < 12f ||
-                DistanceToPatch(center, docks.Start - gridSide) < 12f) return false;
-            for (int gate = -1; gate < docks.Gates.Length; gate++)
+            Vector3 gridSide = Vector3.Cross(Vector3.up, targetCircuit.StartForward) * TrialRival.GridOffset;
+            if (DistanceToPatch(center, targetCircuit.Start + gridSide) < 12f ||
+                DistanceToPatch(center, targetCircuit.Start - gridSide) < 12f) return false;
+            for (int gate = -1; gate < targetCircuit.Gates.Length; gate++)
             {
-                var pose = docks.Respawn(gate);
+                var pose = targetCircuit.Respawn(gate);
                 Vector3 side = Vector3.Cross(Vector3.up, pose.Forward) * 2.4f;
                 if (DistanceToPatch(center, pose.Position) < 12f ||
                     DistanceToPatch(center, pose.Position + side) < 12f ||

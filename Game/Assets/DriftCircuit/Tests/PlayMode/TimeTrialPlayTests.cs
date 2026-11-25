@@ -57,6 +57,7 @@ public sealed class TimeTrialPlayTests
         if (trial)
             yield return SceneManager.UnloadSceneAsync(trial.gameObject.scene);
         TimeTrial.RecordDirectoryOverride = null;
+        TimeTrial.SaveStoreOverride = null;
         if (Directory.Exists(recordDirectory))
             Directory.Delete(recordDirectory, true);
         if (originalGhostPreference < 0)
@@ -925,6 +926,44 @@ public sealed class TimeTrialPlayTests
         Assert.That(trial.Items.Pulses, Is.Empty);
     }
 
+    /// <summary>Verifies Tokyo and Viaduct Quick Races, random ItemPool gates, Route Beacon, and API sync.</summary>
+    [UnityTest]
+    public IEnumerator CityCupQuickRacesAndRacingApiSync()
+    {
+        var api = new InMemoryRacingSaveStore();
+        api.SignInForTests("ApiTester");
+        TimeTrial.SaveStoreOverride = api;
+
+        yield return SelectQuickRace(CourseDefinition.Tokyo);
+        Assert.That(trial.Rival, Is.Not.Null);
+        Assert.That(trial.Items, Is.Not.Null);
+        Assert.That(trial.SaveStore.IsSignedIn, Is.True);
+
+        yield return SelectQuickRace(CourseDefinition.Viaduct);
+        Assert.That(trial.Rival, Is.Not.Null);
+        Assert.That(trial.Items, Is.Not.Null);
+
+        // Toggle Route Beacon from Track Select and verify setting syncs to IRacingSaveStore.
+        int originalBeacon = PlayerPrefs.GetInt(TimeTrial.BeaconPreference, -1);
+        try
+        {
+            PlayerPrefs.SetInt(TimeTrial.BeaconPreference, 0);
+            yield return LoadScene(TimeTrial.MenuScenePath);
+            Keys(Key.UpArrow); yield return null; yield return null;
+            Keys(Key.UpArrow); yield return null; yield return null;
+            Keys(Key.Enter); yield return null; yield return null;
+            Assert.That(PlayerPrefs.GetInt(TimeTrial.BeaconPreference), Is.EqualTo(1));
+            Assert.That(api.LastBeaconSetting, Is.True);
+            Keys();
+        }
+        finally
+        {
+            if (originalBeacon < 0) PlayerPrefs.DeleteKey(TimeTrial.BeaconPreference);
+            else PlayerPrefs.SetInt(TimeTrial.BeaconPreference, originalBeacon);
+            PlayerPrefs.Save();
+        }
+    }
+
     /// <summary>Stages a physics pose and rebases race progression to avoid fabricated checkpoint crossings.</summary>
     private void StageItemKart(TrialKart kart, Vector3 position, Vector3 forward, float speed)
     {
@@ -1324,13 +1363,17 @@ public sealed class TimeTrialPlayTests
         trial.Rival.Rules.Tick((float)(target - trial.Rival.Rules.Elapsed), trial.Rival.Kart.Body.position);
     }
 
-    private IEnumerator SelectQuickRace(bool rustrail = false)
+    private IEnumerator SelectQuickRace(bool rustrail = false) =>
+        SelectQuickRace(rustrail ? CourseDefinition.Rustrail : CourseDefinition.Docks);
+
+    private IEnumerator SelectQuickRace(CourseDefinition target)
     {
         yield return LoadScene(TimeTrial.MenuScenePath);
-        for (int i = 0; i < CourseDefinition.All.Length + (rustrail ? 1 : 0); i++)
+        int offset = System.Array.IndexOf(CourseDefinition.All, target);
+        for (int i = 0; i < CourseDefinition.All.Length + offset; i++)
             yield return PressPad(GamepadButton.DpadDown);
         yield return PressPad(GamepadButton.South);
-        Assert.That(trial.Circuit, Is.SameAs(rustrail ? CourseDefinition.Rustrail : CourseDefinition.Docks));
+        Assert.That(trial.Circuit, Is.SameAs(target));
         Assert.That(trial.Rival, Is.Not.Null);
         Assert.That(trial.KartBody.position, Is.EqualTo(trial.Circuit.Start + Vector3.back * 1.6f));
         Assert.That(trial.Rival.Kart.Body.position, Is.EqualTo(trial.Circuit.Start + Vector3.forward * 1.6f));
@@ -1353,7 +1396,9 @@ public sealed class TimeTrialPlayTests
     public IEnumerator AllTrackSelectControlsAreReachable()
     {
         string[] names = { "Little Tokyo–Skyport", "Concrete Wards Viaduct", "Stratos Docks", "Rustrail Junction",
-            TrialHud.QuickRaceName(CourseDefinition.Docks), TrialHud.QuickRaceName(CourseDefinition.Rustrail), "Ghost" };
+            TrialHud.QuickRaceName(CourseDefinition.Tokyo), TrialHud.QuickRaceName(CourseDefinition.Viaduct),
+            TrialHud.QuickRaceName(CourseDefinition.Docks), TrialHud.QuickRaceName(CourseDefinition.Rustrail),
+            "Route Beacon", "Ghost" };
         for (int device = 0; device < 2; device++)
         {
             yield return LoadScene(TimeTrial.MenuScenePath);

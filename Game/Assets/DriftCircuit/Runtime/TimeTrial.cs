@@ -12,7 +12,9 @@ namespace DriftCircuit
 
         public const string MenuScenePath = "Assets/DriftCircuit/Scenes/TrackSelect.unity";
         internal const string GhostPreference = "DriftCircuit.ShowGhost";
+        internal const string BeaconPreference = "DriftCircuit.ShowBeacon";
         internal static string RecordDirectoryOverride { get; set; }
+        internal static IRacingSaveStore SaveStoreOverride { get; set; }
 
         [SerializeField] private bool startAtTrackSelect;
         private readonly List<Object> owned = new();
@@ -20,11 +22,13 @@ namespace DriftCircuit
         private readonly List<GhostPose> poses = new();
         private GameObject raceRoot;
         private TrialRecordStore records;
+        private IRacingSaveStore saveStore;
         private TrialRecord comparison;
         private TrialGhost ghost;
         private RecordResult result;
         private double? checkpointDelta;
         private bool showGhost;
+        private bool showBeacon;
         private TrialInput input;
         private TrialCourse course;
         private TrialKart kart;
@@ -36,7 +40,9 @@ namespace DriftCircuit
         private bool resetRequested;
         private bool itemRequested;
         private RelayBoostPickups playerPickups, rivalPickups;
+        private ItemPool playerPool, rivalPool;
         internal RaceItems Items { get; private set; }
+        internal IRacingSaveStore SaveStore => saveStore;
         private LineRenderer playerShield, rivalShield;
 
         internal TrialKart PlayerKart => kart;
@@ -56,18 +62,21 @@ namespace DriftCircuit
             input = new TrialInput();
             records = new TrialRecordStore(RecordDirectoryOverride ??
                 Path.Combine(Application.persistentDataPath, "time-trial-records"));
+            saveStore = SaveStoreOverride ?? new HttpRacingSaveStore();
             showGhost = PlayerPrefs.GetInt(GhostPreference, 1) != 0;
+            showBeacon = PlayerPrefs.GetInt(BeaconPreference, 0) != 0;
             hud = new TrialHud(transform, TogglePause, Retry, OpenTrackSelect, StartCircuit,
-                definition => StartCircuit(definition, quickRace: true), ToggleGhost);
+                definition => StartCircuit(definition, quickRace: true), ToggleGhost, ToggleBeacon);
             if (startAtTrackSelect)
                 OpenTrackSelect();
             else
                 StartCircuit(CourseDefinition.Tokyo);
+            _ = saveStore.TryRestoreSessionAsync();
         }
 
         private void StartCircuit(CourseDefinition definition) => StartCircuit(definition, quickRace: false);
 
-        /// <summary>Creates either an item-free trial or a rival race; only Docks Quick Race owns pickups.</summary>
+        /// <summary>Creates either an item-free trial or a rival race; Quick Races except Rustrail use pickups.</summary>
         private void StartCircuit(CourseDefinition definition, bool quickRace)
         {
             Circuit = definition;
@@ -75,18 +84,22 @@ namespace DriftCircuit
             raceRoot.transform.SetParent(transform, false);
             course = new TrialCourse(definition, raceRoot.transform, owned);
             course.Build();
+            course.ShowRouteBeacon(showBeacon);
             Rules = new TrialRules(definition.Gates, definition.Start);
             kart = BuildKart("Player kart", 0x18a4b9, out _);
             if (quickRace)
             {
                 TrialKart rivalKart = BuildKart("Rival kart", 0xf05a27, out Material tailLights);
                 Rival = new TrialRival(definition, rivalKart, tailLights);
-                if (definition == CourseDefinition.Docks)
+                if (definition != CourseDefinition.Rustrail)
                 {
-                    playerPickups = new RelayBoostPickups();
-                    rivalPickups = new RelayBoostPickups();
+                    bool randomPool = definition != CourseDefinition.Docks;
+                    playerPool = randomPool ? new ItemPool(1337) : null;
+                    rivalPool = randomPool ? new ItemPool(7331) : null;
+                    playerPickups = new RelayBoostPickups(definition, playerPool);
+                    rivalPickups = new RelayBoostPickups(definition, rivalPool);
                     course.BuildRelayGates();
-                    Items = new RaceItems(course);
+                    Items = new RaceItems(course, definition);
                     playerShield = BuildShield(kart);
                     rivalShield = BuildShield(rivalKart);
                 }
@@ -106,6 +119,7 @@ namespace DriftCircuit
             Items?.Clear();
             Items = null;
             playerPickups = rivalPickups = null;
+            playerPool = rivalPool = null;
             RestoreTimeScale();
             if (raceRoot)
             {
@@ -122,7 +136,7 @@ namespace DriftCircuit
             comparison = null;
             poses.Clear();
             checkpointTimes.Clear();
-            hud.ShowTracks(records, showGhost);
+            hud.ShowTracks(records, showGhost, showBeacon, saveStore.StatusText);
         }
 
         private void ToggleGhost()
@@ -131,6 +145,16 @@ namespace DriftCircuit
             PlayerPrefs.SetInt(GhostPreference, showGhost ? 1 : 0);
             PlayerPrefs.Save();
             hud.ShowGhostPreference(showGhost);
+            _ = saveStore.SyncSettingsAsync(showGhost, showBeacon);
+        }
+
+        private void ToggleBeacon()
+        {
+            showBeacon = !showBeacon;
+            PlayerPrefs.SetInt(BeaconPreference, showBeacon ? 1 : 0);
+            PlayerPrefs.Save();
+            hud.ShowBeaconPreference(showBeacon);
+            _ = saveStore.SyncSettingsAsync(showGhost, showBeacon);
         }
 
         /// <summary>Starts reading devices when the trial is active.</summary>
@@ -152,6 +176,7 @@ namespace DriftCircuit
         private void OnDestroy()
         {
             input?.Dispose();
+            (saveStore as System.IDisposable)?.Dispose();
             ReleaseRaceResources();
         }
 
@@ -256,7 +281,14 @@ namespace DriftCircuit
                 itemRequested = false;
                 kart.Freeze();
                 if (Rival == null)
+                {
                     result = records.SaveResult(Circuit, Rules, checkpointTimes.ToArray(), poses.ToArray());
+                    if (result != RecordResult.SaveFailed)
+                    {
+                        TrialRecord latest = records.Load(Circuit);
+                        if (latest != null) _ = saveStore.SyncRecordAsync(Circuit, latest);
+                    }
+                }
                 else
                 {
                     Rival.Kart.Freeze();
@@ -294,8 +326,12 @@ namespace DriftCircuit
             // Both recovery attempts precede occupancy checks and all driving input.
             course.UpdateCrossing(Rules.Elapsed, kart,
                 Rival?.Rules.Phase == TrialPhase.Racing ? Rival.Kart : null);
-            playerPickups?.Sample(kart, Rules);
-            rivalPickups?.Sample(Rival.Kart, Rival.Rules);
+            bool playerTrailing = Rival != null &&
+                (Rules.Laps * 10 + Rules.NextGate) < (Rival.Rules.Laps * 10 + Rival.Rules.NextGate);
+            bool rivalTrailing = Rival != null &&
+                (Rival.Rules.Laps * 10 + Rival.Rules.NextGate) < (Rules.Laps * 10 + Rules.NextGate);
+            playerPickups?.Sample(kart, Rules, playerTrailing);
+            rivalPickups?.Sample(Rival.Kart, Rival.Rules, rivalTrailing);
             float throttle = input.Throttle.ReadValue<float>();
             float brake = input.Brake.ReadValue<float>();
             float steer = input.Steer.ReadValue<float>();
@@ -317,6 +353,7 @@ namespace DriftCircuit
             Items?.Advance(Time.fixedDeltaTime);
             if (playerShield) playerShield.enabled = kart.ShieldActive;
             if (rivalShield) rivalShield.enabled = rivalReady && Rival.Kart.ShieldActive;
+            course.ShowRouteBeacon(showBeacon || kart.BeaconActive);
         }
 
         private static void Sample(TrialRules rules, TrialKart racer, bool outOfBounds)
@@ -415,6 +452,8 @@ namespace DriftCircuit
             Rival?.Kart.ClearItems();
             playerPickups?.Restart();
             rivalPickups?.Restart();
+            playerPool?.Reset();
+            rivalPool?.Reset();
             shownGo = 0f;
             comparison = Rival == null ? records.Load(Circuit) : null;
             checkpointDelta = null;

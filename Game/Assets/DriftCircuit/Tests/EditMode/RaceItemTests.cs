@@ -424,4 +424,59 @@ public sealed class RaceItemTests
         owner.Body.position = new(25, 0.58f, -64); Physics.SyncTransforms();
         Assert.That(items.RivalShouldUseSlipstream(owner, target, false, false), Is.False);
     }
+
+    /// <summary>ItemPool draws varied items from a seeded bag and weights trailing karts toward catch-up items.</summary>
+    [Test]
+    public void ItemPoolDistributionAndTrailingWeighting()
+    {
+        var pool = new ItemPool(42);
+        var seen = new System.Collections.Generic.HashSet<RaceItem>();
+        for (int i = 0; i < 6; i++)
+            seen.Add(pool.Next(false));
+        Assert.That(seen.Count, Is.EqualTo(6));
+
+        pool.Reset();
+        int catchUp = 0;
+        for (int i = 0; i < 24; i++)
+        {
+            RaceItem item = pool.Next(true);
+            if (item == RaceItem.RelayBoost || item == RaceItem.SlipstreamLink)
+                catchUp++;
+        }
+        Assert.That(catchUp, Is.EqualTo(12));
+    }
+
+    /// <summary>Route Beacon activates for 6 seconds and Flux Ribbon placement works on Tokyo and Viaduct straights.</summary>
+    [Test]
+    public void RouteBeaconAndMultiCircuitPlacement()
+    {
+        owner.CollectItem(RaceItem.RouteBeacon);
+        Assert.That(items.Activate(owner, true, 0), Is.True);
+        Assert.That(owner.BeaconActive, Is.True);
+        owner.AdvanceEffects(6f);
+        Assert.That(owner.BeaconActive, Is.False);
+
+        Put(owner, new(-25, 0.58f, -38), Vector3.right, 15);
+        Assert.That(RaceItems.TryPlacement(owner, CourseDefinition.Tokyo, out _, out _), Is.True);
+        Put(owner, new(-25, 0.58f, -40), Vector3.right, 15);
+        Assert.That(RaceItems.TryPlacement(owner, CourseDefinition.Viaduct, out _, out _), Is.True);
+    }
+
+    /// <summary>InMemoryRacingSaveStore mirrors the Express/PostgreSQL save contract when signed in.</summary>
+    [Test]
+    public void InMemoryRacingSaveStoreSyncsRecordsAndSettings()
+    {
+        var store = new InMemoryRacingSaveStore();
+        var record = new TrialRecord();
+        Assert.That(store.SyncRecordAsync(CourseDefinition.Tokyo, record).Result, Is.False);
+
+        store.SignInForTests("CyberDriver");
+        Assert.That(store.SyncRecordAsync(CourseDefinition.Tokyo, record).Result, Is.True);
+        Assert.That(store.SyncedRecords.ContainsKey("little-tokyo-skyport-r1"), Is.True);
+        Assert.That(store.SyncSettingsAsync(true, true).Result, Is.True);
+        Assert.That(store.LastGhostSetting && store.LastBeaconSetting, Is.True);
+
+        store.SeedLeaderboard("CyberDriver", 86860);
+        Assert.That(store.FetchLeaderboardAsync().Result, Does.Contain("CyberDriver"));
+    }
 }

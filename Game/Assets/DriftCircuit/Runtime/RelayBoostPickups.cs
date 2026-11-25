@@ -2,7 +2,7 @@ using UnityEngine;
 
 namespace DriftCircuit
 {
-    /// <summary>Per-kart, per-valid-lap allowances for all six shared Docks pickup planes.</summary>
+    /// <summary>Per-kart, per-valid-lap allowances for shared Quick Race pickup planes.</summary>
     internal sealed class RelayBoostPickups
     {
         internal static readonly Checkpoint[] Gates =
@@ -21,9 +21,52 @@ namespace DriftCircuit
             RaceItem.FluxRibbon, RaceItem.SignalTap, RaceItem.SlipstreamLink
         };
 
-        private readonly int[] spentLap = { -1, -1, -1, -1, -1, -1 };
+        private static readonly Checkpoint[] TokyoGates =
+        {
+            new("ITEM GATE", new(15, 0, -38), Vector3.right, 5.2f),
+            new("ITEM GATE", new(-10, 0, 49), Vector3.left, 7.0f),
+            new("ITEM GATE", new(-60, 0, 0), Vector3.back, 5.2f)
+        };
+
+        private static readonly Checkpoint[] ViaductGates =
+        {
+            new("ITEM GATE", new(18, 0, -40), Vector3.right, 6.4f),
+            new("ITEM GATE", new(-10, 0, 64), Vector3.left, 7.4f),
+            new("ITEM GATE", new(-65, 0, -5), Vector3.back, 6.4f)
+        };
+
+        private static readonly RaceItem[] RandomOnly = { RaceItem.None, RaceItem.None, RaceItem.None };
+
+        private readonly Checkpoint[] gates;
+        private readonly RaceItem[] items;
+        private readonly ItemPool pool;
+        private readonly int[] spentLap;
         private Vector3 previous;
         private int placementVersion = -1;
+
+        internal RelayBoostPickups(CourseDefinition circuit = null, ItemPool pool = null)
+        {
+            gates = GatesFor(circuit ?? CourseDefinition.Docks);
+            items = ItemsFor(circuit ?? CourseDefinition.Docks);
+            this.pool = pool;
+            spentLap = new int[gates.Length];
+            for (int i = 0; i < spentLap.Length; i++) spentLap[i] = -1;
+        }
+
+        internal static Checkpoint[] GatesFor(CourseDefinition circuit)
+        {
+            if (circuit == CourseDefinition.Tokyo) return TokyoGates;
+            if (circuit == CourseDefinition.Viaduct) return ViaductGates;
+            if (circuit == CourseDefinition.Rustrail) return System.Array.Empty<Checkpoint>();
+            return Gates;
+        }
+
+        internal static RaceItem[] ItemsFor(CourseDefinition circuit)
+        {
+            if (circuit == CourseDefinition.Tokyo || circuit == CourseDefinition.Viaduct) return RandomOnly;
+            if (circuit == CourseDefinition.Rustrail) return System.Array.Empty<RaceItem>();
+            return Items;
+        }
 
         /// <summary>Retry restores every allowance and discards the prior run's motion segment.</summary>
         internal void Restart()
@@ -44,17 +87,18 @@ namespace DriftCircuit
         }
 
         /// <summary>Samples only racing motion since the last placement; a full slot still spends eligibility.</summary>
-        internal void Sample(TrialKart kart, TrialRules rules)
+        internal void Sample(TrialKart kart, TrialRules rules, bool isTrailing = false)
         {
             Vector3 current = kart.Body.position;
             if (placementVersion == kart.PlacementVersion && rules.Phase == TrialPhase.Racing && !kart.OutOfBounds)
             {
-                for (int i = 0; i < Gates.Length; i++)
+                for (int i = 0; i < gates.Length; i++)
                 {
-                    if (spentLap[i] == rules.Laps || !Crossed(Gates[i], previous, current))
+                    if (spentLap[i] == rules.Laps || !Crossed(gates[i], previous, current))
                         continue;
                     spentLap[i] = rules.Laps;
-                    kart.CollectItem(Items[i]);
+                    RaceItem granted = items[i] != RaceItem.None ? items[i] : (pool?.Next(isTrailing) ?? RaceItem.RelayBoost);
+                    kart.CollectItem(granted);
                 }
             }
             previous = current;

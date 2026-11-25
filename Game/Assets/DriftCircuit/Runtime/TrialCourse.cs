@@ -12,6 +12,7 @@ namespace DriftCircuit
         private readonly List<Object> owned;
         private readonly Material road, shortcut, rail, cyan, amber, white, dark;
         private readonly Material[] gateMaterials;
+        private readonly List<GameObject> beaconViews = new();
         private RailCrossing crossing;
 
         /// <summary>Parents the crossing labels alongside the generated road and signs.</summary>
@@ -46,6 +47,10 @@ namespace DriftCircuit
                 Vector3 heading = branch[i + 1].Center - branch[i - 1].Center;
                 Cube("Shortcut guide", branch[i].Center + Vector3.up * 0.033f,
                     new(0.19f, 0.018f, 1.6f), Quaternion.LookRotation(heading), amber);
+                GameObject beacon = Cube("Route beacon", branch[i].Center + Vector3.up * 1.45f,
+                    new(0.55f, 0.55f, 0.55f), Quaternion.LookRotation(heading), cyan, false);
+                beacon.SetActive(false);
+                beaconViews.Add(beacon);
             }
             for (int i = 0; i < definition.Gates.Length; i++)
                 BuildGate(i);
@@ -70,6 +75,13 @@ namespace DriftCircuit
         {
             if (crossing != null)
                 crossing.Update(elapsed, kart.PhysicsBounds, rival?.PhysicsBounds);
+        }
+
+        /// <summary>Toggles Route Beacon shortcut guidance markers along the branch.</summary>
+        internal void ShowRouteBeacon(bool active)
+        {
+            foreach (GameObject beacon in beaconViews)
+                if (beacon) beacon.SetActive(active);
         }
 
         /// <summary>Lights the next valid gate while leaving the other markers visible.</summary>
@@ -232,12 +244,13 @@ namespace DriftCircuit
         /// <summary>Reuses the non-solid checkpoint gantry and existing text presentation for pickups.</summary>
         internal void BuildRelayGates()
         {
-            foreach (Checkpoint gate in RelayBoostPickups.Gates)
+            foreach (Checkpoint gate in RelayBoostPickups.GatesFor(definition))
             {
                 Material color = gate.Name == "PULSE SHIELD" ? Paint(0x34f4ff, true) :
                     gate.Name == "FLUX RIBBON" ? Paint(0xf04be8, true) :
                     gate.Name == "SIGNAL TAP" ? Paint(0xff9a3c, true) :
-                    gate.Name == "SLIPSTREAM LINK" ? Paint(0x4cff9a, true) : amber;
+                    gate.Name == "SLIPSTREAM LINK" ? Paint(0x4cff9a, true) :
+                    gate.Name == "ITEM GATE" ? cyan : amber;
                 BuildGate(gate, color, false);
                 var label = new GameObject(gate.Name + " label");
                 label.transform.SetParent(root, false);

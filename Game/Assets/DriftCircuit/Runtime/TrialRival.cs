@@ -203,6 +203,7 @@ namespace DriftCircuit
                 RaceItem.FluxRibbon => items.RivalShouldDrop(Kart, player, brakeIntent > 0, yieldingIntent),
                 RaceItem.SignalTap => items.RivalShouldFireTap(Kart, player),
                 RaceItem.SlipstreamLink => items.RivalShouldUseSlipstream(Kart, player, brakeIntent > 0, yieldingIntent),
+                RaceItem.RouteBeacon => true,
                 _ => false
             };
             if (use) items.Activate(Kart, Kart.Grounded, brakeIntent);

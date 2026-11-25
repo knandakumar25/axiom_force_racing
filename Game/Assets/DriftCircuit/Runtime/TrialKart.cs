@@ -21,10 +21,12 @@ namespace DriftCircuit
         internal double ImmunityRemaining { get; private set; }
         internal double AccelTapRemaining { get; private set; }
         internal double SlipstreamRemaining { get; private set; }
+        internal double BeaconRemaining { get; private set; }
         internal bool ShieldActive => ShieldRemaining > 0.0000001d;
         internal bool DisruptionImmune => ImmunityRemaining > 0.0000001d;
         internal bool AccelTapped => AccelTapRemaining > 0.0000001d;
         internal bool SlipstreamActive => SlipstreamRemaining > 0.0000001d;
+        internal bool BeaconActive => BeaconRemaining > 0.0000001d;
         internal float GripMultiplier => GripLossRemaining > 0.0000001d ? 0.55f : 1f;
         internal int ItemsCollected { get; private set; }
         internal int ItemsUsed { get; private set; }
@@ -179,6 +181,15 @@ namespace DriftCircuit
             return true;
         }
 
+        /// <summary>Activates Route Beacon shortcut guidance for six seconds.</summary>
+        internal bool TryUseRouteBeacon()
+        {
+            if (HeldItem != RaceItem.RouteBeacon || BeaconActive) return false;
+            ConsumeItem();
+            BeaconRemaining = 6d;
+            return true;
+        }
+
         /// <summary>Spends a contact immediately; immunity precedes shield absorption and grip loss.</summary>
         internal void ReceiveRibbonHit()
         {
@@ -207,7 +218,7 @@ namespace DriftCircuit
         internal void RecoverEffects() { ClearEffects(); ImmunityRemaining = 1.5d; }
 
         /// <summary>Clears transient effects for placement and Retry; pickup history belongs to the sampler.</summary>
-        private void ClearEffects() { boost = ShieldRemaining = GripLossRemaining = ImmunityRemaining = AccelTapRemaining = SlipstreamRemaining = 0d; }
+        private void ClearEffects() { boost = ShieldRemaining = GripLossRemaining = ImmunityRemaining = AccelTapRemaining = SlipstreamRemaining = BeaconRemaining = 0d; }
 
         /// <summary>Advances effects after handling; only the time after disruptions end consumes new immunity.</summary>
         internal void AdvanceEffects(float dt)
@@ -215,6 +226,7 @@ namespace DriftCircuit
             boost = System.Math.Max(0d, boost - dt);
             ShieldRemaining = System.Math.Max(0d, ShieldRemaining - dt);
             SlipstreamRemaining = System.Math.Max(0d, SlipstreamRemaining - dt);
+            BeaconRemaining = System.Math.Max(0d, BeaconRemaining - dt);
             ImmunityRemaining = System.Math.Max(0d, ImmunityRemaining - dt);
             if (GripLossRemaining > 0.0000001d)
             {
