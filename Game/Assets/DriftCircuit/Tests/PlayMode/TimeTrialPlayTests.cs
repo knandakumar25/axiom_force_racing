@@ -764,7 +764,7 @@ public sealed class TimeTrialPlayTests
         Assert.That(trial.Rules.Phase, Is.EqualTo(TrialPhase.Finished));
         Assert.That(trial.PlayerKart.ItemsCollected, Is.GreaterThan(0));
         Assert.That(trial.PlayerKart.ItemsUsed, Is.GreaterThan(0));
-        Assert.That(trial.PlayerKart.ItemsUsedMask & 14, Is.EqualTo(14), "The gamepad race must activate all three item types.");
+        Assert.That(trial.PlayerKart.ItemsUsedMask & 62, Is.EqualTo(62), "The gamepad race must activate all five item types.");
         Assert.That(yardLaps & 0b011, Is.EqualTo(0b011));
         bool rivalFinished = rival.Rules.Phase == TrialPhase.Finished;
         Assert.That(trial.RaceResult.Value.PlayerPlace, Is.EqualTo(rivalFinished ? 2 : 1));
@@ -881,6 +881,48 @@ public sealed class TimeTrialPlayTests
         Assert.That(player.HeldItem, Is.EqualTo(RaceItem.None));
         Assert.That(player.ShieldActive || player.DisruptionImmune, Is.False);
         Assert.That(trial.Items.Ribbons, Is.Empty);
+    }
+
+    /// <summary>Stages Signal Tap pulse hit, Shield block, Slipstream draft assist, rival use, and Retry cleanup.</summary>
+    [UnityTest]
+    public IEnumerator SignalTapAndSlipstreamStagedInteractions()
+    {
+        yield return SelectQuickRace();
+        yield return new WaitUntil(() => trial.Rules.Phase == TrialPhase.Racing);
+        TrialKart player = trial.PlayerKart, other = trial.Rival.Kart;
+
+        StageItemKart(other, new(10, 0.58f, -64), Vector3.right, 15);
+        StageItemKart(player, new(24, 0.58f, -64), Vector3.right, 15);
+        other.ClearItems(); other.CollectItem(RaceItem.SignalTap);
+        trial.Rival.Decide(player, 0.02f, useItems: true);
+        trial.Rival.ActivateItem(player, trial.Items);
+        Assert.That(other.ItemsUsedMask & 16, Is.EqualTo(16));
+        Assert.That(trial.Items.Pulses.Count, Is.EqualTo(1));
+        Assert.That(trial.Items.IncomingPulse(player), Is.True);
+
+        trial.Items.Resolve(player);
+        for (int i = 0; i < 20 && trial.Items.Pulses.Count > 0; i++)
+        {
+            trial.Items.Advance(0.02f);
+            trial.Items.Resolve(player);
+        }
+        Assert.That(trial.Items.Pulses, Is.Empty);
+        Assert.That(player.AccelTapped, Is.True);
+
+        // Slipstream Link draft assist accelerates player behind rival and clears on Retry.
+        StageItemKart(other, new(30, 0.58f, -64), Vector3.right, 25);
+        StageItemKart(player, new(15, 0.58f, -64), Vector3.right, 25);
+        player.ClearItems(); player.CollectItem(RaceItem.SlipstreamLink);
+        QueueItemStep();
+        Assert.That(player.SlipstreamActive, Is.True);
+        Assert.That(RaceItems.IsInSlipstream(player, other), Is.True);
+        player.Step(1f, 0f, 0f, false, true, 0.2f, true, true);
+        Assert.That(player.ForwardSpeed, Is.GreaterThan(25.5f));
+
+        yield return PressPad(GamepadButton.Start);
+        yield return PressPad(GamepadButton.South);
+        Assert.That(player.SlipstreamActive || player.AccelTapped, Is.False);
+        Assert.That(trial.Items.Pulses, Is.Empty);
     }
 
     /// <summary>Stages a physics pose and rebases race progression to avoid fabricated checkpoint crossings.</summary>
@@ -1586,6 +1628,8 @@ public sealed class TimeTrialPlayTests
                     RaceItem.RelayBoost => waterfront && position.x is > 23f and < 30f,
                     RaceItem.PulseShield => !player.ShieldActive && (position.z < 0f || position.x < 18f),
                     RaceItem.FluxRibbon => drive.leftTrigger < 0.02f && RaceItems.TryPlacement(player, out _, out _),
+                    RaceItem.SignalTap => true,
+                    RaceItem.SlipstreamLink => true,
                     _ => false
                 };
             }

@@ -192,22 +192,25 @@ namespace DriftCircuit
                 NeedsRecovery = true;
         }
 
-        /// <summary>Uses the evaluated traffic intent for Relay/Ribbon and current path prediction for Shield.</summary>
+        /// <summary>Uses evaluated traffic intent for Relay/Ribbon/Slipstream and current prediction for Shield/Tap.</summary>
         internal void ActivateItem(TrialKart player, RaceItems items)
         {
             bool use = Kart.HeldItem switch
             {
                 RaceItem.RelayBoost => CanUseRelayBoost(player, brakeIntent > 0, yieldingIntent),
-                RaceItem.PulseShield => !Kart.ShieldActive && !Kart.DisruptionImmune && items.Incoming(Kart),
+                RaceItem.PulseShield => !Kart.ShieldActive && !Kart.DisruptionImmune &&
+                    (items.Incoming(Kart) || items.IncomingPulse(Kart)),
                 RaceItem.FluxRibbon => items.RivalShouldDrop(Kart, player, brakeIntent > 0, yieldingIntent),
+                RaceItem.SignalTap => items.RivalShouldFireTap(Kart, player),
+                RaceItem.SlipstreamLink => items.RivalShouldUseSlipstream(Kart, player, brakeIntent > 0, yieldingIntent),
                 _ => false
             };
             if (use) items.Activate(Kart, Kart.Grounded, brakeIntent);
         }
 
         /// <summary>Applies the previously evaluated controls; runtime advances effect timers after both karts.</summary>
-        internal void Apply(float dt, bool advanceEffects = true) =>
-            Kart.Step(throttleIntent, brakeIntent, steerIntent, false, Kart.Grounded, dt, advanceEffects);
+        internal void Apply(float dt, bool advanceEffects = true, bool inSlipstream = false) =>
+            Kart.Step(throttleIntent, brakeIntent, steerIntent, false, Kart.Grounded, dt, advanceEffects, inSlipstream);
 
         /// <summary>Requires room for the whole boost and checks every sampled tangent for 45 metres.</summary>
         internal bool CanUseRelayBoost(TrialKart player, bool brake, bool yielding)

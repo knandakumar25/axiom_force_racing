@@ -196,7 +196,8 @@ namespace DriftCircuit
         }
 
         private void RefreshHud() => hud.Refresh(Rules, kart, shownGo > 0f, checkpointDelta, result, RaceResult,
-            Items?.Incoming(kart) ?? false);
+            Items?.Incoming(kart) ?? false, Items?.IncomingPulse(kart) ?? false,
+            RaceItems.IsInSlipstream(kart, Rival?.Kart));
 
         /// <summary>Advances countdown or applies the racing step, including respawn and gate checks.</summary>
         private void FixedUpdate()
@@ -307,9 +308,10 @@ namespace DriftCircuit
             if (!outOfBounds) Items?.Resolve(kart);
             if (rivalReady) Items?.Resolve(Rival.Kart);
             if (!outOfBounds)
-                kart.Step(throttle, brake, steer, drift, kart.Grounded, Time.fixedDeltaTime, false);
+                kart.Step(throttle, brake, steer, drift, kart.Grounded, Time.fixedDeltaTime, false,
+                    RaceItems.IsInSlipstream(kart, Rival?.Kart));
             if (rivalReady)
-                Rival.Apply(Time.fixedDeltaTime, false);
+                Rival.Apply(Time.fixedDeltaTime, false, RaceItems.IsInSlipstream(Rival.Kart, kart));
             kart.AdvanceEffects(Time.fixedDeltaTime);
             if (rivalReady) Rival.Kart.AdvanceEffects(Time.fixedDeltaTime);
             Items?.Advance(Time.fixedDeltaTime);

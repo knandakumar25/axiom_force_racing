@@ -235,7 +235,9 @@ namespace DriftCircuit
             foreach (Checkpoint gate in RelayBoostPickups.Gates)
             {
                 Material color = gate.Name == "PULSE SHIELD" ? Paint(0x34f4ff, true) :
-                    gate.Name == "FLUX RIBBON" ? Paint(0xf04be8, true) : amber;
+                    gate.Name == "FLUX RIBBON" ? Paint(0xf04be8, true) :
+                    gate.Name == "SIGNAL TAP" ? Paint(0xff9a3c, true) :
+                    gate.Name == "SLIPSTREAM LINK" ? Paint(0x4cff9a, true) : amber;
                 BuildGate(gate, color, false);
                 var label = new GameObject(gate.Name + " label");
                 label.transform.SetParent(root, false);

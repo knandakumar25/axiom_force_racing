@@ -185,7 +185,8 @@ namespace DriftCircuit
 
         /// <summary>Refreshes live readings and updates the result card when its phase changes.</summary>
         public void Refresh(TrialRules rules, TrialKart kart, bool showGo, double? checkpointDelta,
-            RecordResult result, QuickRaceResult? quickResult, bool incomingRibbon = false)
+            RecordResult result, QuickRaceResult? quickResult, bool incomingRibbon = false,
+            bool incomingPulse = false, bool inSlipstream = false)
         {
             bool finished = rules.Phase == TrialPhase.Finished;
             string finishTitle = quickRace ? "QUICK RACE COMPLETE" : "TIME TRIAL COMPLETE";
@@ -206,12 +207,17 @@ namespace DriftCircuit
                 RaceItem.RelayBoost => "RELAY BOOST READY",
                 RaceItem.FluxRibbon => "FLUX RIBBON READY",
                 RaceItem.PulseShield => "PULSE SHIELD READY",
+                RaceItem.SignalTap => "SIGNAL TAP READY",
+                RaceItem.SlipstreamLink => "SLIPSTREAM LINK READY",
                 _ => "ITEM SLOT EMPTY"
             };
             effects.text = (kart.ShieldActive ? $"SHIELD {kart.ShieldRemaining:0.0}s\n" : "") +
                 (kart.GripLossRemaining > 0.0000001d ? $"GRIP LOSS {kart.GripLossRemaining:0.0}s\n" : "") +
+                (kart.AccelTapped ? $"TAP -ACCEL {kart.AccelTapRemaining:0.0}s\n" : "") +
+                (kart.SlipstreamActive ? $"SLIPSTREAM {(inSlipstream ? "DRAFT " : "")}{kart.SlipstreamRemaining:0.0}s\n" : "") +
                 (kart.DisruptionImmune ? $"IMMUNITY {kart.ImmunityRemaining:0.0}s\n" : "") +
-                (incomingRibbon ? "INCOMING RIBBON" : "");
+                (incomingRibbon ? "INCOMING RIBBON\n" : "") +
+                (incomingPulse ? "INCOMING PULSE" : "");
             banner.text = rules.Phase == TrialPhase.Countdown ? Math.Ceiling(rules.Countdown).ToString()
                 : rules.Phase == TrialPhase.Racing && showGo ? "GO" : "";
 

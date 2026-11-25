@@ -43,8 +43,8 @@ public sealed class RaceItemTests
     private static void Put(TrialKart kart, Vector3 position, Vector3 forward, float speed)
     { kart.Place(position, forward); kart.Body.linearVelocity = forward * speed; Physics.SyncTransforms(); }
 
-    /// <summary>All four gates enforce direction, stationary suppression, swept width and height constraints.</summary>
-    [TestCase(0)] [TestCase(1)] [TestCase(2)] [TestCase(3)]
+    /// <summary>All six gates enforce direction, stationary suppression, swept width and height constraints.</summary>
+    [TestCase(0)] [TestCase(1)] [TestCase(2)] [TestCase(3)] [TestCase(4)] [TestCase(5)]
     public void EveryGateHasSweptBounds(int index)
     {
         Checkpoint gate = RelayBoostPickups.Gates[index];
@@ -60,7 +60,7 @@ public sealed class RaceItemTests
     }
 
     /// <summary>Each gate/racer has an independent allowance; full slots spend it and Retry restores it.</summary>
-    [TestCase(0)] [TestCase(1)] [TestCase(2)] [TestCase(3)]
+    [TestCase(0)] [TestCase(1)] [TestCase(2)] [TestCase(3)] [TestCase(4)] [TestCase(5)]
     public void EveryGateKeepsFullSlotsAndIndependentHistory(int index)
     {
         Checkpoint gate = RelayBoostPickups.Gates[index];
@@ -325,5 +325,103 @@ public sealed class RaceItemTests
             Assert.That(owner.HeldItem, Is.EqualTo(used ? RaceItem.None : RaceItem.PulseShield));
         }
         finally { Object.DestroyImmediate(lights); }
+    }
+
+    /// <summary>Signal Tap fires straight ahead, hits only the first opponent, respects Shield/immunity, and expires at 45 m.</summary>
+    [Test]
+    public void SignalTapPulseTravelHitShieldAndExpiry()
+    {
+        Put(owner, new(0, 0.58f, -64), Vector3.right, 15);
+        Put(target, new(12, 0.58f, -64), Vector3.right, 15);
+        owner.CollectItem(RaceItem.SignalTap);
+        Assert.That(items.Activate(owner, true, 0), Is.True);
+        Assert.That(owner.HeldItem, Is.EqualTo(RaceItem.None));
+        Assert.That(items.Pulses.Count, Is.EqualTo(1));
+        Assert.That(items.IncomingPulse(target), Is.True);
+
+        // Lateral lane change dodges the non-tracking pulse.
+        target.Body.position = new(12, 0.58f, -61.5f); Physics.SyncTransforms();
+        Assert.That(items.IncomingPulse(target), Is.False);
+        target.Body.position = new(12, 0.58f, -64); Physics.SyncTransforms();
+
+        items.Resolve(target);
+        items.Advance(0.35f);
+        target.Body.position = new(17.25f, 0.58f, -64); Physics.SyncTransforms();
+        items.Resolve(target);
+        Assert.That(items.Pulses, Is.Empty, "First hit must consume the pulse.");
+        Assert.That(target.AccelTapped, Is.True);
+
+        // Reduced acceleration applies during tap without blocking steering or braking.
+        float before = target.ForwardSpeed;
+        target.Step(1f, 0f, 0f, false, true, 0.2f);
+        Assert.That(target.ForwardSpeed - before, Is.EqualTo(5.5f * 0.2f).Within(0.05f));
+        target.AdvanceEffects(0.8f);
+        Assert.That(target.AccelTapped, Is.False);
+        Assert.That(target.DisruptionImmune, Is.True);
+
+        // Shield absorbs an opposing Signal Tap and grants immunity.
+        target.ClearItems();
+        target.CollectItem(RaceItem.PulseShield);
+        Assert.That(target.TryUseShield(), Is.True);
+        target.ReceiveSignalTapHit();
+        Assert.That(target.ShieldActive, Is.False);
+        Assert.That(target.AccelTapped, Is.False);
+        Assert.That(target.DisruptionImmune, Is.True);
+
+        // Pulse expires after traveling 45 m with no target hit.
+        owner.CollectItem(RaceItem.SignalTap);
+        items.Activate(owner, true, 0);
+        for (int i = 0; i < 60; i++) items.Advance(0.02f);
+        Assert.That(items.Pulses, Is.Empty);
+    }
+
+    /// <summary>Slipstream Link boosts only while inside the leader's draft cone and stops immediately on exit.</summary>
+    [Test]
+    public void SlipstreamDraftConeAndHandlingAssist()
+    {
+        Put(target, new(30, 0.58f, -64), Vector3.right, 25);
+        Put(owner, new(15, 0.58f, -64), Vector3.right, 25);
+        Assert.That(RaceItems.IsInSlipstream(owner, target), Is.True);
+        Assert.That(RaceItems.IsInSlipstream(target, owner), Is.False);
+
+        owner.CollectItem(RaceItem.SlipstreamLink);
+        Assert.That(items.Activate(owner, true, 0), Is.True);
+        Assert.That(owner.SlipstreamActive, Is.True);
+
+        // Inside draft: accelerates past normal 25 m/s top speed toward 30 m/s.
+        owner.Step(1f, 0f, 0f, false, true, 0.2f, true, true);
+        Assert.That(owner.ForwardSpeed, Is.GreaterThan(25.5f));
+
+        // Leaving draft cone immediately drops the assist back toward normal 25 m/s.
+        owner.Body.position = new(15, 0.58f, -61f); Physics.SyncTransforms();
+        Assert.That(RaceItems.IsInSlipstream(owner, target), Is.False);
+        float outside = owner.ForwardSpeed;
+        owner.Step(1f, 0f, 0f, false, true, 0.2f, true, false);
+        Assert.That(owner.ForwardSpeed, Is.LessThan(outside));
+    }
+
+    /// <summary>Rival fires Signal Tap only when player is straight ahead and activates Slipstream only in draft.</summary>
+    [Test]
+    public void RivalSignalTapAndSlipstreamPolicies()
+    {
+        Put(owner, new(10, 0.58f, -64), Vector3.right, 20);
+        Put(target, new(25, 0.58f, -64), Vector3.right, 20);
+
+        owner.CollectItem(RaceItem.SignalTap);
+        Assert.That(items.RivalShouldFireTap(owner, target), Is.True);
+        target.RecoverEffects();
+        Assert.That(items.RivalShouldFireTap(owner, target), Is.False);
+        target.ClearItems();
+        target.Body.position = new(25, 0.58f, -61.5f); Physics.SyncTransforms();
+        Assert.That(items.RivalShouldFireTap(owner, target), Is.False);
+
+        target.Body.position = new(25, 0.58f, -64); Physics.SyncTransforms();
+        owner.ClearItems();
+        owner.CollectItem(RaceItem.SlipstreamLink);
+        Assert.That(items.RivalShouldUseSlipstream(owner, target, false, false), Is.True);
+        Assert.That(items.RivalShouldUseSlipstream(owner, target, true, false), Is.False);
+        Assert.That(items.RivalShouldUseSlipstream(owner, target, false, true), Is.False);
+        owner.Body.position = new(25, 0.58f, -64); Physics.SyncTransforms();
+        Assert.That(items.RivalShouldUseSlipstream(owner, target, false, false), Is.False);
     }
 }

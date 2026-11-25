@@ -2,7 +2,7 @@ using UnityEngine;
 
 namespace DriftCircuit
 {
-    /// <summary>Per-kart, per-valid-lap allowances for all four shared Docks pickup planes.</summary>
+    /// <summary>Per-kart, per-valid-lap allowances for all six shared Docks pickup planes.</summary>
     internal sealed class RelayBoostPickups
     {
         internal static readonly Checkpoint[] Gates =
@@ -10,12 +10,18 @@ namespace DriftCircuit
             new("RELAY BOOST", new(20, 0, -64), Vector3.right, 7.7f),
             new("RELAY BOOST", new(20, 0, 62), Vector3.left, 7.7f),
             new("PULSE SHIELD", new(60, 0, 62), Vector3.left, 7.7f),
-            new("FLUX RIBBON", new(-20, 0, 62), Vector3.left, 7.7f)
+            new("FLUX RIBBON", new(-20, 0, 62), Vector3.left, 7.7f),
+            new("SIGNAL TAP", new(-20, 0, -64), Vector3.right, 7.7f),
+            new("SLIPSTREAM LINK", new(50, 0, -64), Vector3.right, 7.7f)
         };
 
-        internal static readonly RaceItem[] Items = { RaceItem.RelayBoost, RaceItem.RelayBoost, RaceItem.PulseShield, RaceItem.FluxRibbon };
+        internal static readonly RaceItem[] Items =
+        {
+            RaceItem.RelayBoost, RaceItem.RelayBoost, RaceItem.PulseShield,
+            RaceItem.FluxRibbon, RaceItem.SignalTap, RaceItem.SlipstreamLink
+        };
 
-        private readonly int[] spentLap = { -1, -1, -1, -1 };
+        private readonly int[] spentLap = { -1, -1, -1, -1, -1, -1 };
         private Vector3 previous;
         private int placementVersion = -1;
 

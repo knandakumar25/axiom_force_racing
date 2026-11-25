@@ -4,13 +4,16 @@ using UnityEngine;
 namespace DriftCircuit
 {
     /// <summary>The single internal Docks inventory slot; never serialized into trial records.</summary>
-    internal enum RaceItem { None, RelayBoost, FluxRibbon, PulseShield }
+    internal enum RaceItem { None, RelayBoost, FluxRibbon, PulseShield, SignalTap, SlipstreamLink }
 
-    /// <summary>Runs non-solid ribbon placement, swept contacts and prediction using simulation time.</summary>
+    /// <summary>Runs ribbon placement, straight-ahead signal pulses, slipstream cones, swept contacts, and prediction.</summary>
     internal sealed class RaceItems
     {
         // Float fixed steps accumulate in double timers; one microsecond covers six seconds of 20 ms steps.
         private const double TimerTolerance = 0.000001d;
+        internal const float PulseSpeed = 48f;
+        internal const float PulseMaxRange = 45f;
+
         /// <summary>A fixed road rectangle, its owner's placement generation and one-hit eligibility.</summary>
         internal sealed class Ribbon
         {
@@ -28,12 +31,33 @@ namespace DriftCircuit
             { Owner = owner; Center = center; Forward = forward; PlacementVersion = owner.PlacementVersion; DeployedAt = deployedAt; }
         }
 
+        /// <summary>A non-tracking straight-ahead pulse that expires at max range or on first opponent hit.</summary>
+        internal sealed class SignalPulse
+        {
+            internal readonly TrialKart Owner;
+            internal readonly Vector3 Forward;
+            internal readonly int PlacementVersion;
+            internal Vector3 PreviousPosition, Position;
+            internal float Traveled;
+            internal GameObject View;
+
+            internal SignalPulse(TrialKart owner, Vector3 origin, Vector3 forward)
+            {
+                Owner = owner;
+                PreviousPosition = Position = origin;
+                Forward = forward;
+                PlacementVersion = owner.PlacementVersion;
+            }
+        }
+
         private readonly List<Ribbon> ribbons = new();
+        private readonly List<SignalPulse> pulses = new();
         private readonly Dictionary<TrialKart, (Vector3 Position, int Version, double Time)> previous = new();
         private double clock;
         private readonly TrialCourse course;
-        private readonly Material dormant, armed, stripe;
+        private readonly Material dormant, armed, stripe, pulseMat;
         internal IReadOnlyList<Ribbon> Ribbons => ribbons;
+        internal IReadOnlyList<SignalPulse> Pulses => pulses;
 
         /// <summary>Optional course supplies shared primitive materials; pure rule tests need no visuals.</summary>
         internal RaceItems(TrialCourse course = null)
@@ -43,6 +67,7 @@ namespace DriftCircuit
             dormant = course.Paint(0x704383, true);
             armed = course.Paint(0xf04be8, true);
             stripe = course.Paint(0xffdf83, true);
+            pulseMat = course.Paint(0xff9a3c, true);
         }
 
         /// <summary>Clears all world effects and motion samples for Retry and Track Select.</summary>
@@ -50,6 +75,8 @@ namespace DriftCircuit
         {
             foreach (Ribbon patch in ribbons) RemoveView(patch);
             ribbons.Clear();
+            foreach (SignalPulse pulse in pulses) RemoveView(pulse.View);
+            pulses.Clear();
             previous.Clear();
             clock = 0;
         }
@@ -62,11 +89,13 @@ namespace DriftCircuit
             kart.RecoverEffects();
         }
 
-        /// <summary>Retirement immediately removes the racer's deployed patches.</summary>
+        /// <summary>Retirement immediately removes the racer's deployed patches and pulses.</summary>
         internal void RemoveOwned(TrialKart kart)
         {
             for (int i = ribbons.Count - 1; i >= 0; i--)
                 if (ribbons[i].Owner == kart) { RemoveView(ribbons[i]); ribbons.RemoveAt(i); }
+            for (int i = pulses.Count - 1; i >= 0; i--)
+                if (pulses[i].Owner == kart) { RemoveView(pulses[i].View); pulses.RemoveAt(i); }
         }
 
         /// <summary>Dispatches the held item after both racers have evaluated their controls.</summary>
@@ -74,6 +103,20 @@ namespace DriftCircuit
         {
             if (kart.HeldItem == RaceItem.RelayBoost) return kart.TryUseRelayBoost(grounded, brake);
             if (kart.HeldItem == RaceItem.PulseShield) return kart.TryUseShield();
+            if (kart.HeldItem == RaceItem.SlipstreamLink) return kart.TryUseSlipstream();
+            if (kart.HeldItem == RaceItem.SignalTap)
+            {
+                Vector3 tapForward = kart.Body.rotation * Vector3.forward;
+                Vector3 origin = kart.Body.position + tapForward * 1.8f;
+                origin.y = kart.Body.position.y;
+                var pulse = new SignalPulse(kart, origin, tapForward);
+                if (course != null)
+                    pulse.View = course.Cube("Signal Tap pulse", origin + Vector3.up * 0.55f,
+                        new(0.85f, 0.25f, 1.9f), Quaternion.LookRotation(tapForward), pulseMat);
+                pulses.Add(pulse);
+                kart.ConsumeItem();
+                return true;
+            }
             if (kart.HeldItem != RaceItem.FluxRibbon || !grounded || brake > 0.02f ||
                 kart.ForwardSpeed <= 4.000001f || !TryPlacement(kart, out Vector3 center, out Vector3 forward)) return false;
             foreach (Ribbon patch in ribbons)
@@ -141,6 +184,58 @@ namespace DriftCircuit
             return false;
         }
 
+        /// <summary>Predicts whether an opposing straight-ahead pulse will reach the kart within the window.</summary>
+        internal bool IncomingPulse(TrialKart target)
+        {
+            if (!target.Grounded) return false;
+            foreach (SignalPulse pulse in pulses)
+            {
+                if (!OwnerValid(pulse.Owner, pulse.PlacementVersion) || pulse.Owner == target) continue;
+                float enter = 0f;
+                float exit = Mathf.Min(1f, Mathf.Max(0f, (PulseMaxRange - pulse.Traveled) / PulseSpeed));
+                if (enter <= exit && IntersectsBox(pulse.Position, pulse.Forward,
+                        target.Body.position - pulse.Position, target.Body.linearVelocity - pulse.Forward * PulseSpeed,
+                        1.6f, 1.5f, ref enter, ref exit))
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>True while the trailing kart holds a grounded draft line behind the leader.</summary>
+        internal static bool IsInSlipstream(TrialKart trailer, TrialKart leader)
+        {
+            if (trailer == null || leader == null || !trailer.Grounded || !leader.Grounded ||
+                !leader.Body.gameObject.activeInHierarchy)
+                return false;
+            Vector3 leaderForward = leader.Body.rotation * Vector3.forward;
+            Vector3 trailerForward = trailer.Body.rotation * Vector3.forward;
+            if (Vector3.Angle(trailerForward, leaderForward) > 20f) return false;
+            Vector3 offset = leader.Body.position - trailer.Body.position;
+            float behind = Vector3.Dot(offset, leaderForward);
+            if (behind < 3f || behind > 28f) return false;
+            Vector3 right = Vector3.Cross(Vector3.up, leaderForward);
+            return Mathf.Abs(Vector3.Dot(offset, right)) <= 2.2f && Mathf.Abs(offset.y) <= 1.5f;
+        }
+
+        /// <summary>Fires Signal Tap only when an unprotected opponent lies straight ahead within range.</summary>
+        internal bool RivalShouldFireTap(TrialKart rival, TrialKart player)
+        {
+            if (rival.HeldItem != RaceItem.SignalTap || !rival.Grounded || !player.Grounded ||
+                !player.Body.gameObject.activeInHierarchy || player.ShieldActive || player.DisruptionImmune)
+                return false;
+            Vector3 forward = rival.Body.rotation * Vector3.forward;
+            Vector3 offset = player.Body.position - rival.Body.position;
+            float ahead = Vector3.Dot(offset, forward);
+            if (ahead < 4f || ahead > 40f) return false;
+            Vector3 right = Vector3.Cross(Vector3.up, forward);
+            return Mathf.Abs(Vector3.Dot(offset, right)) <= 1.5f && Mathf.Abs(offset.y) <= 1.5f;
+        }
+
+        /// <summary>Activates Slipstream Link only while trailing the player in the draft cone without braking.</summary>
+        internal bool RivalShouldUseSlipstream(TrialKart rival, TrialKart player, bool brake, bool yielding) =>
+            rival.HeldItem == RaceItem.SlipstreamLink && !rival.SlipstreamActive && !brake && !yielding &&
+            rival.ForwardSpeed > 4f && IsInSlipstream(rival, player);
+
         /// <summary>Uses the player's current velocity to justify an offensive drop, with no lane avoidance.</summary>
         internal bool RivalShouldDrop(TrialKart rival, TrialKart player, bool brake, bool yielding)
         {
@@ -177,18 +272,35 @@ namespace DriftCircuit
                     patch.Spent.Add(kart); // Protected contact spends eligibility, so there is no delayed hit.
                     kart.ReceiveRibbonHit();
                 }
+
+                for (int i = pulses.Count - 1; i >= 0; i--)
+                {
+                    SignalPulse pulse = pulses[i];
+                    if (!OwnerValid(pulse.Owner, pulse.PlacementVersion) || pulse.Owner == kart) continue;
+                    float enter = 0f, exit = 1f;
+                    Vector3 relOrigin = sample.Position - pulse.PreviousPosition;
+                    Vector3 relVel = (current - sample.Position) - (pulse.Position - pulse.PreviousPosition);
+                    if (!IntersectsBox(pulse.PreviousPosition, pulse.Forward, relOrigin, relVel, 1.6f, 1.5f, ref enter, ref exit))
+                        continue;
+                    kart.ReceiveSignalTapHit();
+                    RemoveView(pulse.View);
+                    pulses.RemoveAt(i);
+                }
             }
             previous[kart] = (current, kart.PlacementVersion, clock);
         }
 
         /// <summary>Clips a point path to the rectangle expanded by the kart centre contact margins and height.</summary>
-        private static bool Intersects(Ribbon patch, Vector3 origin, Vector3 velocity, ref float enter, ref float exit)
+        private static bool Intersects(Ribbon patch, Vector3 origin, Vector3 velocity, ref float enter, ref float exit) =>
+            IntersectsBox(patch.Center, patch.Forward, origin - patch.Center, velocity, 2.25f, 3.25f, ref enter, ref exit);
+
+        private static bool IntersectsBox(Vector3 center, Vector3 forward, Vector3 offset, Vector3 velocity,
+            float halfWidth, float halfLength, ref float enter, ref float exit)
         {
-            Vector3 offset = origin - patch.Center;
-            Vector3 right = Vector3.Cross(Vector3.up, patch.Forward);
-            return Slab(Vector3.Dot(offset, right), Vector3.Dot(velocity, right), -2.25f, 2.25f, ref enter, ref exit) &&
-                Slab(Vector3.Dot(offset, patch.Forward), Vector3.Dot(velocity, patch.Forward), -3.25f, 3.25f, ref enter, ref exit) &&
-                Slab(origin.y, velocity.y, 0.15f, 1.3f, ref enter, ref exit);
+            Vector3 right = Vector3.Cross(Vector3.up, forward);
+            return Slab(Vector3.Dot(offset, right), Vector3.Dot(velocity, right), -halfWidth, halfWidth, ref enter, ref exit) &&
+                Slab(Vector3.Dot(offset, forward), Vector3.Dot(velocity, forward), -halfLength, halfLength, ref enter, ref exit) &&
+                Slab(center.y + offset.y, velocity.y, 0.15f, 1.3f, ref enter, ref exit);
         }
 
         /// <summary>Clips one axis, handling stationary paths without division by zero.</summary>
@@ -204,10 +316,12 @@ namespace DriftCircuit
         private static bool Live(Ribbon patch) => patch.Age < 6d - TimerTolerance && OwnerValid(patch);
 
         /// <summary>Recovery and retirement invalidate contacts regardless of the sampled time interval.</summary>
-        private static bool OwnerValid(Ribbon patch) => patch.Owner.PlacementVersion == patch.PlacementVersion &&
-            patch.Owner.Body.gameObject.activeInHierarchy;
+        private static bool OwnerValid(Ribbon patch) => OwnerValid(patch.Owner, patch.PlacementVersion);
 
-        /// <summary>Advances patch age after contacts and changes the visible arming state without wall-clock timers.</summary>
+        private static bool OwnerValid(TrialKart owner, int version) => owner.PlacementVersion == version &&
+            owner.Body.gameObject.activeInHierarchy;
+
+        /// <summary>Advances patch age and pulse travel after contacts without wall-clock timers.</summary>
         internal void Advance(float dt)
         {
             clock += dt;
@@ -225,10 +339,28 @@ namespace DriftCircuit
                     patch.View.GetComponent<Renderer>().sharedMaterial = armed;
                 }
             }
+
+            for (int i = pulses.Count - 1; i >= 0; i--)
+            {
+                SignalPulse pulse = pulses[i];
+                if (pulse.Traveled >= PulseMaxRange - TimerTolerance || !OwnerValid(pulse.Owner, pulse.PlacementVersion))
+                { RemoveView(pulse.View); pulses.RemoveAt(i); continue; }
+                pulse.PreviousPosition = pulse.Position;
+                float step = Mathf.Min(PulseSpeed * dt, PulseMaxRange - pulse.Traveled);
+                pulse.Position += pulse.Forward * step;
+                pulse.Traveled += step;
+                if (pulse.View)
+                {
+                    if (pulse.Traveled >= PulseMaxRange - TimerTolerance) pulse.View.SetActive(false);
+                    else pulse.View.transform.position = pulse.Position + Vector3.up * 0.55f;
+                }
+            }
         }
 
         /// <summary>Hides immediately before Unity's deferred destruction releases primitive renderers.</summary>
-        private static void RemoveView(Ribbon patch)
-        { if (patch.View) { patch.View.SetActive(false); Object.Destroy(patch.View); } }
+        private static void RemoveView(Ribbon patch) => RemoveView(patch.View);
+
+        private static void RemoveView(GameObject view)
+        { if (view) { view.SetActive(false); Object.Destroy(view); } }
     }
 }

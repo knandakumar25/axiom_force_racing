@@ -19,8 +19,12 @@ namespace DriftCircuit
         internal double ShieldRemaining { get; private set; }
         internal double GripLossRemaining { get; private set; }
         internal double ImmunityRemaining { get; private set; }
+        internal double AccelTapRemaining { get; private set; }
+        internal double SlipstreamRemaining { get; private set; }
         internal bool ShieldActive => ShieldRemaining > 0.0000001d;
         internal bool DisruptionImmune => ImmunityRemaining > 0.0000001d;
+        internal bool AccelTapped => AccelTapRemaining > 0.0000001d;
+        internal bool SlipstreamActive => SlipstreamRemaining > 0.0000001d;
         internal float GripMultiplier => GripLossRemaining > 0.0000001d ? 0.55f : 1f;
         internal int ItemsCollected { get; private set; }
         internal int ItemsUsed { get; private set; }
@@ -166,6 +170,15 @@ namespace DriftCircuit
             return true;
         }
 
+        /// <summary>Opens a four-second slipstream window; assist applies only while holding the draft line.</summary>
+        internal bool TryUseSlipstream()
+        {
+            if (HeldItem != RaceItem.SlipstreamLink || SlipstreamActive) return false;
+            ConsumeItem();
+            SlipstreamRemaining = 4d;
+            return true;
+        }
+
         /// <summary>Spends a contact immediately; immunity precedes shield absorption and grip loss.</summary>
         internal void ReceiveRibbonHit()
         {
@@ -178,17 +191,30 @@ namespace DriftCircuit
             else if (GripLossRemaining <= 0.0000001d) GripLossRemaining = 1d;
         }
 
+        /// <summary>Applies a brief acceleration reduction unless immune or absorbed by Pulse Shield.</summary>
+        internal void ReceiveSignalTapHit()
+        {
+            if (DisruptionImmune) return;
+            if (ShieldActive)
+            {
+                ShieldRemaining = 0d;
+                ImmunityRemaining = 1.5d;
+            }
+            else if (!AccelTapped) AccelTapRemaining = 1d;
+        }
+
         /// <summary>Recovery clears active effects and grants protection without changing inventory.</summary>
         internal void RecoverEffects() { ClearEffects(); ImmunityRemaining = 1.5d; }
 
         /// <summary>Clears transient effects for placement and Retry; pickup history belongs to the sampler.</summary>
-        private void ClearEffects() { boost = ShieldRemaining = GripLossRemaining = ImmunityRemaining = 0d; }
+        private void ClearEffects() { boost = ShieldRemaining = GripLossRemaining = ImmunityRemaining = AccelTapRemaining = SlipstreamRemaining = 0d; }
 
-        /// <summary>Advances effects after handling; only the time after grip loss ends consumes new immunity.</summary>
+        /// <summary>Advances effects after handling; only the time after disruptions end consumes new immunity.</summary>
         internal void AdvanceEffects(float dt)
         {
             boost = System.Math.Max(0d, boost - dt);
             ShieldRemaining = System.Math.Max(0d, ShieldRemaining - dt);
+            SlipstreamRemaining = System.Math.Max(0d, SlipstreamRemaining - dt);
             ImmunityRemaining = System.Math.Max(0d, ImmunityRemaining - dt);
             if (GripLossRemaining > 0.0000001d)
             {
@@ -196,10 +222,17 @@ namespace DriftCircuit
                 GripLossRemaining = System.Math.Max(0d, left);
                 if (left <= 0.0000001d) ImmunityRemaining = System.Math.Max(0d, 1.5d + System.Math.Min(0d, left));
             }
+            if (AccelTapRemaining > 0.0000001d)
+            {
+                double left = AccelTapRemaining - dt;
+                AccelTapRemaining = System.Math.Max(0d, left);
+                if (left <= 0.0000001d) ImmunityRemaining = System.Math.Max(0d, 1.5d + System.Math.Min(0d, left));
+            }
         }
 
         /// <summary>Applies one grounded handling step and tracks boost in simulation seconds.</summary>
-        public void Step(float throttle, float brake, float steer, bool driftHeld, bool grounded, float dt, bool advanceEffects = true)
+        public void Step(float throttle, float brake, float steer, bool driftHeld, bool grounded, float dt,
+            bool advanceEffects = true, bool inSlipstream = false)
         {
             Vector3 forward = Body.rotation * Vector3.forward;
             Vector3 right = Body.rotation * Vector3.right;
@@ -224,8 +257,11 @@ namespace DriftCircuit
                 return;
             }
 
-            float target = BoostActive ? 34f : throttle * NormalSpeed;
-            float acceleration = BoostActive ? 29f : 13f;
+            bool drafting = !BoostActive && SlipstreamActive && inSlipstream && throttle > 0.02f && brake <= 0.02f;
+            float target = BoostActive ? 34f : drafting ? 30f : throttle * NormalSpeed;
+            float acceleration = BoostActive ? 29f : drafting ? 21f : 13f;
+            if (!BoostActive && AccelTapped && throttle > 0.02f && brake <= 0.02f)
+                acceleration = 5.5f;
             if (brake > 0.02f)
             {
                 target = speed > 0.35f ? 0f : -6f * brake;
