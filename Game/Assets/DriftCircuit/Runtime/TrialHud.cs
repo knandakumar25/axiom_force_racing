@@ -24,6 +24,8 @@ namespace DriftCircuit
         private Button[] activeButtons;
         private int selected;
         private bool quickRace;
+        private readonly Text item, itemBinding, effects;
+        private readonly GameObject itemPanel;
         private TrialPhase previousPhase = (TrialPhase)(-1);
 
         /// <summary>Creates the screen-space HUD and binds its pointer buttons.</summary>
@@ -57,6 +59,13 @@ namespace DriftCircuit
             RectTransform handling = Panel("Kart information", raceCanvas, bottomRight, new(-24, 24), new(221, 83), Ink);
             speed = Label("Speed", handling, topLeft, new(16, -8), new(190, 34), 27, Color.white);
             boost = Label("Boost", handling, topLeft, new(16, -46), new(190, 27), 17, Aqua);
+
+            RectTransform items = Panel("Held item", raceCanvas, bottomRight, new(-24, 119), new(290, 145), Ink);
+            itemPanel = items.gameObject;
+            item = Label("Item", items, topLeft, new(14, -7), new(239, 25), 17, Gold);
+            itemBinding = Label("Item binding", items, topLeft, new(14, -35), new(239, 24), 15, Color.white);
+            itemBinding.text = "E / West button (X / Square)  Use";
+            effects = Label("Item effects", items, topLeft, new(14, -64), new(268, 76), 16, Aqua, TextAnchor.UpperLeft);
 
             RectTransform help = Panel("Controls", raceCanvas, bottomLeft, new(24, 24), new(534, 62), Ink);
             Label("Keyboard", help, topLeft, new(14, -7), new(515, 23), 16, Color.white).text =
@@ -139,11 +148,13 @@ namespace DriftCircuit
 
         public void ShowGhostPreference(bool enabled) => ghostLabel.text = enabled ? "Ghost   ON" : "Ghost   OFF";
 
+        /// <summary>Sets the race title and exposes item feedback only in Docks Quick Race.</summary>
         public void ShowCircuit(CourseDefinition definition, bool isQuickRace)
         {
             menu.SetActive(false);
             raceHud.SetActive(true);
             quickRace = isQuickRace;
+            itemPanel.SetActive(isQuickRace && definition == CourseDefinition.Docks);
             circuit.fontSize = quickRace ? 14 : 18;
             circuit.text = (quickRace ? QuickRaceName(definition) : definition.Name).ToUpperInvariant();
             previousPhase = (TrialPhase)(-1);
@@ -174,7 +185,7 @@ namespace DriftCircuit
 
         /// <summary>Refreshes live readings and updates the result card when its phase changes.</summary>
         public void Refresh(TrialRules rules, TrialKart kart, bool showGo, double? checkpointDelta,
-            RecordResult result, QuickRaceResult? quickResult)
+            RecordResult result, QuickRaceResult? quickResult, bool incomingRibbon = false)
         {
             bool finished = rules.Phase == TrialPhase.Finished;
             string finishTitle = quickRace ? "QUICK RACE COMPLETE" : "TIME TRIAL COMPLETE";
@@ -190,6 +201,17 @@ namespace DriftCircuit
             bool ready = racing && kart.BoostReady;
             boost.text = active ? "BOOST ACTIVE" : ready ? "BOOST READY" : "DRIFT TO CHARGE";
             boost.color = active || ready ? Gold : Aqua;
+            item.text = kart.HeldItem switch
+            {
+                RaceItem.RelayBoost => "RELAY BOOST READY",
+                RaceItem.FluxRibbon => "FLUX RIBBON READY",
+                RaceItem.PulseShield => "PULSE SHIELD READY",
+                _ => "ITEM SLOT EMPTY"
+            };
+            effects.text = (kart.ShieldActive ? $"SHIELD {kart.ShieldRemaining:0.0}s\n" : "") +
+                (kart.GripLossRemaining > 0.0000001d ? $"GRIP LOSS {kart.GripLossRemaining:0.0}s\n" : "") +
+                (kart.DisruptionImmune ? $"IMMUNITY {kart.ImmunityRemaining:0.0}s\n" : "") +
+                (incomingRibbon ? "INCOMING RIBBON" : "");
             banner.text = rules.Phase == TrialPhase.Countdown ? Math.Ceiling(rules.Countdown).ToString()
                 : rules.Phase == TrialPhase.Racing && showGo ? "GO" : "";
 

@@ -25,6 +25,8 @@ namespace DriftCircuit
         private float windowTime;
         private float brakeLightTime;
         private bool braking;
+        private float throttleIntent, brakeIntent, steerIntent;
+        private bool yieldingIntent;
 
         public TrialKart Kart { get; }
         public TrialRules Rules { get; }
@@ -90,7 +92,17 @@ namespace DriftCircuit
             ShowBrake(false, force: true);
         }
 
-        public void Step(TrialKart player, float dt, RailCrossing crossing = null)
+        /// <summary>Follows the current route, yielding to traffic and using items only on eligible straights.</summary>
+        public void Step(TrialKart player, float dt, RailCrossing crossing = null, bool useItems = false)
+        {
+            Decide(player, dt, crossing, useItems);
+            if (useItems && CanUseRelayBoost(player, brakeIntent > 0, yieldingIntent))
+                Kart.TryUseRelayBoost(Kart.Grounded, 0f);
+            Apply(dt);
+        }
+
+        /// <summary>Computes driving intent without changing velocity, preserving a shared item/contact snapshot.</summary>
+        internal void Decide(TrialKart player, float dt, RailCrossing crossing = null, bool useItems = false)
         {
             Vector3 position = Kart.Body.position;
             position.y = 0f;
@@ -146,6 +158,10 @@ namespace DriftCircuit
             float bend = Vector3.Angle(forward, EndOf(ahead) - line[ahead]);
             float turn = Mathf.Max(Mathf.Abs(angle), bend * 0.75f);
             float desired = Mathf.Lerp(waterfront ? 25f : 14f, 6f, turn / 37f);
+            // Allow the shared boost to accelerate on clear straights instead of braking
+            // against its higher target. Retain a 25 m braking approach to the next bend.
+            if (useItems && Kart.BoostActive && HasStraightAhead(25f))
+                desired = 34f;
             float gap = player.ClearanceAhead(Kart.Body.position, forward);
             float leadSpeed = Mathf.Max(0f, Vector3.Dot(player.Body.linearVelocity, forward));
             float clearanceSpeed = Mathf.Max(0f, leadSpeed + (gap - 2.4f) * 1.5f);
@@ -162,8 +178,10 @@ namespace DriftCircuit
             float throttle = Mathf.Clamp01(desired / 25f + (desired - speed) * 0.16f);
             float brakeMargin = yielding ? 0.35f : 0.55f;
             bool brake = speed > Mathf.Max(0.4f, desired + brakeMargin);
-            Kart.Step(throttle, brake ? 0.75f : 0f, Mathf.Clamp(angle / 33f, -1f, 1f),
-                false, Kart.Grounded, dt);
+            throttleIntent = throttle;
+            brakeIntent = brake ? 0.75f : 0f;
+            steerIntent = Mathf.Clamp(angle / 33f, -1f, 1f);
+            yieldingIntent = yielding;
             // Keep a short brake tap visible in the chase view.
             brakeLightTime = brake ? 0.18f : Mathf.Max(0f, brakeLightTime - dt);
             ShowBrake(brakeLightTime > 0f);
@@ -172,6 +190,53 @@ namespace DriftCircuit
                 RebaseProgress();
             else if ((windowTime += dt) >= StuckSeconds - 0.00001f)
                 NeedsRecovery = true;
+        }
+
+        /// <summary>Uses the evaluated traffic intent for Relay/Ribbon and current path prediction for Shield.</summary>
+        internal void ActivateItem(TrialKart player, RaceItems items)
+        {
+            bool use = Kart.HeldItem switch
+            {
+                RaceItem.RelayBoost => CanUseRelayBoost(player, brakeIntent > 0, yieldingIntent),
+                RaceItem.PulseShield => !Kart.ShieldActive && !Kart.DisruptionImmune && items.Incoming(Kart),
+                RaceItem.FluxRibbon => items.RivalShouldDrop(Kart, player, brakeIntent > 0, yieldingIntent),
+                _ => false
+            };
+            if (use) items.Activate(Kart, Kart.Grounded, brakeIntent);
+        }
+
+        /// <summary>Applies the previously evaluated controls; runtime advances effect timers after both karts.</summary>
+        internal void Apply(float dt, bool advanceEffects = true) =>
+            Kart.Step(throttleIntent, brakeIntent, steerIntent, false, Kart.Grounded, dt, advanceEffects);
+
+        /// <summary>Requires room for the whole boost and checks every sampled tangent for 45 metres.</summary>
+        internal bool CanUseRelayBoost(TrialKart player, bool brake, bool yielding)
+        {
+            if (!Kart.RelayBoostHeld || !Kart.Grounded || Kart.ForwardSpeed <= 8f || brake || yielding ||
+                Vector3.Distance(Kart.Body.position, player.Body.position) < 40f)
+                return false;
+            return HasStraightAhead(45f);
+        }
+
+        /// <summary>Checks route alignment and all tangent samples over the requested clear distance.</summary>
+        internal bool HasStraightAhead(float metres)
+        {
+            Vector3 forward = Kart.Body.rotation * Vector3.forward;
+            Vector3 point = Project(segment, Kart.Body.position, out _);
+            float remaining = metres;
+            int index = segment;
+            for (int visited = 0; visited < segmentCount; visited++)
+            {
+                Vector3 end = EndOf(index);
+                if (Vector3.Angle(forward, end - line[index]) > 5f)
+                    return false;
+                remaining -= Vector3.Distance(point, end);
+                if (remaining <= 0f)
+                    return true;
+                point = end;
+                index = (index + 1) % segmentCount;
+            }
+            return false;
         }
 
         // Use the schedule, never a closure deferred by another kart, to commit at the fork.

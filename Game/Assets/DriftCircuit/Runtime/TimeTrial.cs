@@ -34,6 +34,13 @@ namespace DriftCircuit
         private float shownGo;
         private bool ownsPause;
         private bool resetRequested;
+        private bool itemRequested;
+        private RelayBoostPickups playerPickups, rivalPickups;
+        internal RaceItems Items { get; private set; }
+        private LineRenderer playerShield, rivalShield;
+
+        internal TrialKart PlayerKart => kart;
+        internal bool ItemsEnabled => playerPickups != null;
 
         internal CourseDefinition Circuit { get; private set; }
         internal TrialRival Rival { get; private set; }
@@ -60,6 +67,7 @@ namespace DriftCircuit
 
         private void StartCircuit(CourseDefinition definition) => StartCircuit(definition, quickRace: false);
 
+        /// <summary>Creates either an item-free trial or a rival race; only Docks Quick Race owns pickups.</summary>
         private void StartCircuit(CourseDefinition definition, bool quickRace)
         {
             Circuit = definition;
@@ -73,6 +81,15 @@ namespace DriftCircuit
             {
                 TrialKart rivalKart = BuildKart("Rival kart", 0xf05a27, out Material tailLights);
                 Rival = new TrialRival(definition, rivalKart, tailLights);
+                if (definition == CourseDefinition.Docks)
+                {
+                    playerPickups = new RelayBoostPickups();
+                    rivalPickups = new RelayBoostPickups();
+                    course.BuildRelayGates();
+                    Items = new RaceItems(course);
+                    playerShield = BuildShield(kart);
+                    rivalShield = BuildShield(rivalKart);
+                }
             }
             else
                 ghost = new TrialGhost(raceRoot.transform, kart.Body.transform, GhostMaterial());
@@ -82,8 +99,13 @@ namespace DriftCircuit
             RefreshHud();
         }
 
+        /// <summary>Discards pending gameplay input and releases the current race before showing the menu.</summary>
         private void OpenTrackSelect()
         {
+            itemRequested = false;
+            Items?.Clear();
+            Items = null;
+            playerPickups = rivalPickups = null;
             RestoreTimeScale();
             if (raceRoot)
             {
@@ -117,6 +139,7 @@ namespace DriftCircuit
         /// <summary>Restores the caller's time scale if a paused trial is disabled or unloaded.</summary>
         private void OnDisable()
         {
+            itemRequested = false;
             input?.Disable();
             if (ownsPause)
             {
@@ -142,6 +165,11 @@ namespace DriftCircuit
         /// <summary>Reads frame-edge button actions, including the actions used during pause.</summary>
         private void Update()
         {
+            // Latch an edge for exactly one racing physics step. Menu/countdown edges are discarded.
+            if (Rules?.Phase != TrialPhase.Racing || !ItemsEnabled || resetRequested)
+                itemRequested = false;
+            else if (input.Item.WasPressedThisFrame())
+                itemRequested = true;
             if (Rules == null || Rules.Phase == TrialPhase.Paused || Rules.Phase == TrialPhase.Finished)
             {
                 if (Rules?.Phase == TrialPhase.Paused && input.Drift.WasReleasedThisFrame())
@@ -155,7 +183,10 @@ namespace DriftCircuit
             else if (input.Pause.WasPressedThisFrame())
                 TogglePause();
             else if (Rules.Phase == TrialPhase.Racing && input.Reset.WasPressedThisFrame())
+            {
                 resetRequested = true;
+                itemRequested = false;
+            }
 
             if (Rules == null)
                 return;
@@ -164,7 +195,8 @@ namespace DriftCircuit
             RefreshHud();
         }
 
-        private void RefreshHud() => hud.Refresh(Rules, kart, shownGo > 0f, checkpointDelta, result, RaceResult);
+        private void RefreshHud() => hud.Refresh(Rules, kart, shownGo > 0f, checkpointDelta, result, RaceResult,
+            Items?.Incoming(kart) ?? false);
 
         /// <summary>Advances countdown or applies the racing step, including respawn and gate checks.</summary>
         private void FixedUpdate()
@@ -173,6 +205,8 @@ namespace DriftCircuit
                 return;
             if (Rules.Phase == TrialPhase.Countdown)
             {
+                playerPickups?.Sample(kart, Rules);
+                rivalPickups?.Sample(Rival.Kart, Rival.Rules);
                 Rules.Tick(Time.fixedDeltaTime, kart.Body.position);
                 Rival?.Rules.Tick(Time.fixedDeltaTime, Rival.Kart.Body.position);
                 if (Rules.Phase == TrialPhase.Racing)
@@ -211,10 +245,14 @@ namespace DriftCircuit
                 rivalOutOfBounds = Rival.Kart.OutOfBounds;
                 Sample(Rival.Rules, Rival.Kart, rivalOutOfBounds);
                 if (Rival.Rules.Phase == TrialPhase.Finished)
+                {
+                    Items?.RemoveOwned(Rival.Kart);
                     Rival.Retire();
+                }
             }
             if (Rules.Phase == TrialPhase.Finished)
             {
+                itemRequested = false;
                 kart.Freeze();
                 if (Rival == null)
                     result = records.SaveResult(Circuit, Rules, checkpointTimes.ToArray(), poses.ToArray());
@@ -230,11 +268,13 @@ namespace DriftCircuit
             // Account for legitimate movement before a manual reset, then rebase at the new position.
             if (resetRequested || outOfBounds)
             {
+                itemRequested = false;
                 if (TryRespawn(kart, Rules, Rival?.Kart, out Vector3 respawn, out Vector3 forward))
                 {
                     resetRequested = false;
                     outOfBounds = false;
                     PlaceKart(respawn, forward);
+                    Items?.Recover(kart);
                     if (Rival == null)
                         CapturePose(reset: true);
                 }
@@ -245,16 +285,36 @@ namespace DriftCircuit
             {
                 rivalReady = TryRespawn(Rival.Kart, Rival.Rules, kart, out Vector3 respawn, out Vector3 forward);
                 if (rivalReady)
+                {
                     Rival.Recover(respawn, forward);
+                    Items?.Recover(Rival.Kart);
+                }
             }
             // Both recovery attempts precede occupancy checks and all driving input.
             course.UpdateCrossing(Rules.Elapsed, kart,
                 Rival?.Rules.Phase == TrialPhase.Racing ? Rival.Kart : null);
+            playerPickups?.Sample(kart, Rules);
+            rivalPickups?.Sample(Rival.Kart, Rival.Rules);
+            float throttle = input.Throttle.ReadValue<float>();
+            float brake = input.Brake.ReadValue<float>();
+            float steer = input.Steer.ReadValue<float>();
+            bool drift = input.Drift.IsPressed();
+            if (rivalReady) Rival.Decide(kart, Time.fixedDeltaTime, course.Crossing, ItemsEnabled);
+            if (itemRequested && !outOfBounds)
+                Items?.Activate(kart, kart.Grounded, brake);
+            itemRequested = false;
+            if (rivalReady) Rival.ActivateItem(kart, Items);
+            if (!outOfBounds) Items?.Resolve(kart);
+            if (rivalReady) Items?.Resolve(Rival.Kart);
             if (!outOfBounds)
-                kart.Step(input.Throttle.ReadValue<float>(), input.Brake.ReadValue<float>(),
-                    input.Steer.ReadValue<float>(), input.Drift.IsPressed(), kart.Grounded, Time.fixedDeltaTime);
+                kart.Step(throttle, brake, steer, drift, kart.Grounded, Time.fixedDeltaTime, false);
             if (rivalReady)
-                Rival.Step(kart, Time.fixedDeltaTime, course.Crossing);
+                Rival.Apply(Time.fixedDeltaTime, false);
+            kart.AdvanceEffects(Time.fixedDeltaTime);
+            if (rivalReady) Rival.Kart.AdvanceEffects(Time.fixedDeltaTime);
+            Items?.Advance(Time.fixedDeltaTime);
+            if (playerShield) playerShield.enabled = kart.ShieldActive;
+            if (rivalShield) rivalShield.enabled = rivalReady && Rival.Kart.ShieldActive;
         }
 
         private static void Sample(TrialRules rules, TrialKart racer, bool outOfBounds)
@@ -304,6 +364,7 @@ namespace DriftCircuit
         /// <summary>Freezes physics and race time while leaving menu input responsive.</summary>
         private void TogglePause()
         {
+            itemRequested = false;
             ToggleRacePhases();
             if (Rules.Phase == TrialPhase.Paused)
             {
@@ -344,6 +405,14 @@ namespace DriftCircuit
         {
             RestoreTimeScale();
             resetRequested = false;
+            itemRequested = false;
+            kart.ClearItems();
+            Items?.Clear();
+            if (playerShield) playerShield.enabled = false;
+            if (rivalShield) rivalShield.enabled = false;
+            Rival?.Kart.ClearItems();
+            playerPickups?.Restart();
+            rivalPickups?.Restart();
             shownGo = 0f;
             comparison = Rival == null ? records.Load(Circuit) : null;
             checkpointDelta = null;
@@ -424,6 +493,23 @@ namespace DriftCircuit
                 tire.GetComponent<Collider>().enabled = false;
             }
             return new TrialKart(body, collider);
+        }
+
+        /// <summary>Draws a cyan non-solid outline using the course's existing material shader.</summary>
+        private LineRenderer BuildShield(TrialKart target)
+        {
+            var outline = new GameObject("Pulse Shield outline");
+            outline.transform.SetParent(target.Body.transform, false);
+            var line = outline.AddComponent<LineRenderer>();
+            line.sharedMaterial = course.Paint(0x34f4ff, true);
+            line.useWorldSpace = false;
+            line.loop = true;
+            line.widthMultiplier = 0.065f;
+            line.positionCount = 4;
+            line.SetPositions(new[] { new Vector3(-0.95f, 0, -1.45f), new Vector3(-0.95f, 0, 1.45f),
+                new Vector3(0.95f, 0, 1.45f), new Vector3(0.95f, 0, -1.45f) });
+            line.enabled = false;
+            return line;
         }
 
         private Material GhostMaterial()

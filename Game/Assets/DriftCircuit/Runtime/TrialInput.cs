@@ -7,7 +7,7 @@ namespace DriftCircuit
     internal sealed class TrialInput : IDisposable
     {
         private readonly InputActionMap map = new("Time Trial");
-        public readonly InputAction Steer, Throttle, Brake, Drift, Reset, Pause, Confirm, MenuUp, MenuDown;
+        public readonly InputAction Steer, Throttle, Brake, Drift, Item, Reset, Pause, Confirm, MenuUp, MenuDown;
 
         /// <summary>Creates both digital keyboard and analog gamepad bindings.</summary>
         public TrialInput()
@@ -19,6 +19,7 @@ namespace DriftCircuit
             Throttle = Bind("Throttle", "<Keyboard>/w", "<Keyboard>/upArrow", "<Gamepad>/rightTrigger");
             Brake = Bind("Brake", "<Keyboard>/s", "<Keyboard>/downArrow", "<Gamepad>/leftTrigger");
             Drift = Bind("Drift", "<Keyboard>/space", "<Gamepad>/rightShoulder");
+            Item = Bind("Item", "<Keyboard>/e", "<Gamepad>/buttonWest");
             Reset = Bind("Reset", "<Keyboard>/r", "<Gamepad>/buttonNorth");
             Pause = Bind("Pause", "<Keyboard>/escape", "<Gamepad>/start");
             Confirm = Bind("Confirm menu", "<Keyboard>/enter", "<Gamepad>/buttonSouth");

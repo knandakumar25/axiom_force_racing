@@ -9,13 +9,25 @@ namespace DriftCircuit
         private const float NormalSpeed = 25f;
         private readonly BoxCollider collider;
         private float charge;
-        private float boost;
+        private double boost;
         private bool driftAllowed;
         private bool drifting;
 
         public Rigidbody Body { get; }
+        internal RaceItem HeldItem { get; private set; }
+        internal bool RelayBoostHeld => HeldItem == RaceItem.RelayBoost;
+        internal double ShieldRemaining { get; private set; }
+        internal double GripLossRemaining { get; private set; }
+        internal double ImmunityRemaining { get; private set; }
+        internal bool ShieldActive => ShieldRemaining > 0.0000001d;
+        internal bool DisruptionImmune => ImmunityRemaining > 0.0000001d;
+        internal float GripMultiplier => GripLossRemaining > 0.0000001d ? 0.55f : 1f;
+        internal int ItemsCollected { get; private set; }
+        internal int ItemsUsed { get; private set; }
+        internal int ItemsUsedMask { get; private set; }
+        internal int PlacementVersion { get; private set; }
         public bool BoostReady => charge >= 0.49999f;
-        public bool BoostActive => boost > 0f;
+        public bool BoostActive => boost > 0.0000001d;
         public float ForwardSpeed => Vector3.Dot(Body.linearVelocity, Body.rotation * Vector3.forward);
         public bool OutOfBounds => Body.position.y < -1.35f || Body.position.sqrMagnitude > 125f * 125f;
         public bool Grounded => Physics.Raycast(Body.position - Vector3.up * 0.20f, Vector3.down,
@@ -91,6 +103,7 @@ namespace DriftCircuit
         /// <summary>Teleports the body and clears motion and transient handling state.</summary>
         public void Place(Vector3 position, Vector3 forward)
         {
+            PlacementVersion++;
             if (Body.isKinematic)
                 Body.isKinematic = false;
             Body.linearVelocity = Vector3.zero;
@@ -98,12 +111,95 @@ namespace DriftCircuit
             Body.position = position;
             Body.rotation = Quaternion.LookRotation(forward);
             Body.transform.SetPositionAndRotation(Body.position, Body.rotation);
-            charge = boost = 0;
+            charge = 0f;
+            boost = 0d;
+            ClearEffects();
             drifting = driftAllowed = false;
         }
 
+        /// <summary>Fills the single slot without replacing an item already held.</summary>
+        internal void CollectRelayBoost()
+        {
+            CollectItem(RaceItem.RelayBoost);
+        }
+
+        /// <summary>Collects into the shared slot; full slots keep their existing item.</summary>
+        internal void CollectItem(RaceItem item)
+        {
+            if (HeldItem != RaceItem.None || item == RaceItem.None)
+                return;
+            HeldItem = item;
+            ItemsCollected++;
+        }
+
+        /// <summary>Retry clears inventories and telemetry; ordinary placement preserves them.</summary>
+        internal void ClearItems()
+        {
+            HeldItem = RaceItem.None;
+            ClearEffects();
+            ItemsCollected = ItemsUsed = 0;
+            ItemsUsedMask = 0;
+        }
+
+        /// <summary>Consumes a held item only for forward, grounded driving without braking.</summary>
+        internal bool TryUseRelayBoost(bool grounded, float brake)
+        {
+            if (!RelayBoostHeld || !grounded || ForwardSpeed <= 4f || brake > 0.02f)
+                return false;
+            ConsumeItem();
+            ActivateBoost();
+            return true;
+        }
+
+        /// <summary>Both boost sources refresh one timer and share the existing speed and acceleration.</summary>
+        internal void ActivateBoost() => boost = BoostDuration;
+
+        /// <summary>Consumes only a successfully activated item, recording one use.</summary>
+        internal void ConsumeItem() { ItemsUsedMask |= 1 << (int)HeldItem; HeldItem = RaceItem.None; ItemsUsed++; }
+
+        /// <summary>Shield works even at rest or under braking; an active shield preserves the slot.</summary>
+        internal bool TryUseShield()
+        {
+            if (HeldItem != RaceItem.PulseShield || ShieldActive) return false;
+            ConsumeItem();
+            ShieldRemaining = 3d;
+            return true;
+        }
+
+        /// <summary>Spends a contact immediately; immunity precedes shield absorption and grip loss.</summary>
+        internal void ReceiveRibbonHit()
+        {
+            if (DisruptionImmune) return;
+            if (ShieldActive)
+            {
+                ShieldRemaining = 0d;
+                ImmunityRemaining = 1.5d;
+            }
+            else if (GripLossRemaining <= 0.0000001d) GripLossRemaining = 1d;
+        }
+
+        /// <summary>Recovery clears active effects and grants protection without changing inventory.</summary>
+        internal void RecoverEffects() { ClearEffects(); ImmunityRemaining = 1.5d; }
+
+        /// <summary>Clears transient effects for placement and Retry; pickup history belongs to the sampler.</summary>
+        private void ClearEffects() { boost = ShieldRemaining = GripLossRemaining = ImmunityRemaining = 0d; }
+
+        /// <summary>Advances effects after handling; only the time after grip loss ends consumes new immunity.</summary>
+        internal void AdvanceEffects(float dt)
+        {
+            boost = System.Math.Max(0d, boost - dt);
+            ShieldRemaining = System.Math.Max(0d, ShieldRemaining - dt);
+            ImmunityRemaining = System.Math.Max(0d, ImmunityRemaining - dt);
+            if (GripLossRemaining > 0.0000001d)
+            {
+                double left = GripLossRemaining - dt;
+                GripLossRemaining = System.Math.Max(0d, left);
+                if (left <= 0.0000001d) ImmunityRemaining = System.Math.Max(0d, 1.5d + System.Math.Min(0d, left));
+            }
+        }
+
         /// <summary>Applies one grounded handling step and tracks boost in simulation seconds.</summary>
-        public void Step(float throttle, float brake, float steer, bool driftHeld, bool grounded, float dt)
+        public void Step(float throttle, float brake, float steer, bool driftHeld, bool grounded, float dt, bool advanceEffects = true)
         {
             Vector3 forward = Body.rotation * Vector3.forward;
             Vector3 right = Body.rotation * Vector3.right;
@@ -114,7 +210,7 @@ namespace DriftCircuit
             if (!driftHeld)
             {
                 if (drifting && BoostReady && grounded && speed > 4f)
-                    boost = BoostDuration;
+                    ActivateBoost();
                 driftAllowed = true;
             }
             float sideways = Vector3.Dot(velocity, right);
@@ -124,7 +220,7 @@ namespace DriftCircuit
 
             if (!grounded)
             {
-                boost = Mathf.Max(0f, boost - dt);
+                if (advanceEffects) AdvanceEffects(dt);
                 return;
             }
 
@@ -139,12 +235,12 @@ namespace DriftCircuit
                 acceleration = 5f;
 
             speed = Mathf.MoveTowards(speed, target, acceleration * dt);
-            float lateral = sideways * Mathf.Exp(-(drifting ? 2.8f : 10f) * dt);
+            float lateral = sideways * Mathf.Exp(-(drifting ? 2.8f : 10f) * GripMultiplier * dt);
             Body.linearVelocity = forward * speed + right * lateral + Vector3.up * velocity.y;
             float steeringRate = Mathf.Lerp(140f, 74f, Mathf.Abs(speed) / NormalSpeed);
             float motion = Mathf.Clamp(speed / 2.5f, -1f, 1f);
             Body.MoveRotation(Body.rotation * Quaternion.Euler(0, steer * motion * steeringRate * (drifting ? 1.28f : 1f) * dt, 0));
-            boost = Mathf.Max(0f, boost - dt);
+            if (advanceEffects) AdvanceEffects(dt);
         }
     }
 }

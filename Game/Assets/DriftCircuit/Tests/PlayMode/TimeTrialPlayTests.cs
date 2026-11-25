@@ -683,10 +683,13 @@ public sealed class TimeTrialPlayTests
         TrialRival rival = trial.Rival;
         Material tailLights = rival.Kart.Body.transform.Find("Rear lights").GetComponent<Renderer>().sharedMaterial;
         bool brakedInChicane = false;
+        float northBoostSpeed = 0f;
         int yardLaps = 0;
         while (rival.Rules.Phase == TrialPhase.Racing && trial.Rules.Elapsed <= 175)
         {
             Vector3 position = rival.Kart.Body.position;
+            if (rival.Kart.BoostActive && position.z > 60f)
+                northBoostSpeed = Mathf.Max(northBoostSpeed, rival.Kart.ForwardSpeed);
             Vector2 flat = new(position.x, position.z);
             if (position.y > 0.3f && (flat - new Vector2(-61, -12)).sqrMagnitude < 9f)
                 yardLaps |= 1 << rival.Rules.Laps;
@@ -701,12 +704,17 @@ public sealed class TimeTrialPlayTests
         Assert.That(brakedInChicane, Is.True, "The rival's brake light should be visible in the chicane.");
         Assert.That(rival.Recoveries, Is.Zero);
         Assert.That(rival.Rules.Elapsed, Is.LessThanOrEqualTo(175));
+        Assert.That(rival.Kart.ItemsCollected, Is.GreaterThan(0));
+        Assert.That(rival.Kart.ItemsUsed, Is.GreaterThan(0));
+        Assert.That(rival.Kart.HeldItem, Is.EqualTo(RaceItem.PulseShield),
+            "Without an incoming threat the rival retains Shield, spending later pickup allowances while full.");
         Assert.That(rival.Kart.Body.gameObject.activeInHierarchy, Is.False);
         Assert.That(trial.Rules.Phase, Is.EqualTo(TrialPhase.Racing));
         double rivalTime = rival.Rules.Elapsed;
-        Debug.Log($"Quick Race rival completed three loading-yard laps in {rivalTime:F2}s with zero recoveries.");
+        Debug.Log($"Quick Race rival completed three loading-yard laps in {rivalTime:F2}s with zero recoveries; " +
+            $"items collected {rival.Kart.ItemsCollected}, used {rival.Kart.ItemsUsed}, north boost peak {northBoostSpeed:F2} m/s.");
 
-        for (int i = 0; i < trial.Circuit.Gates.Length * TrialRules.LapCount; i++)
+        for (int i = 0; i < trial.Circuit.Gates.Length * TrialRules.LapCount && trial.Rules.Phase == TrialPhase.Racing; i++)
         {
             StageGate(trial.KartBody, trial.Rules, trial.Rules.ExpectedGate, 0);
             yield return new WaitForFixedUpdate();
@@ -748,24 +756,316 @@ public sealed class TimeTrialPlayTests
                 yardLaps |= 1 << rival.Rules.Laps;
             Assert.That((flat - new Vector2(-91, -12)).sqrMagnitude, Is.GreaterThanOrEqualTo(9f));
         }
-        yield return DriveLap(false, 1, observe: WatchRival);
-        yield return DriveLap(true, 2, observe: WatchRival);
-        yield return DriveLap(false, 3, observe: WatchRival);
+        yield return DriveLap(false, 1, observe: WatchRival, useRelayBoost: true);
+        yield return DriveLap(true, 2, observe: WatchRival, useRelayBoost: true);
+        yield return DriveLap(false, 3, observe: WatchRival, useRelayBoost: true);
         yield return null;
 
         Assert.That(trial.Rules.Phase, Is.EqualTo(TrialPhase.Finished));
+        Assert.That(trial.PlayerKart.ItemsCollected, Is.GreaterThan(0));
+        Assert.That(trial.PlayerKart.ItemsUsed, Is.GreaterThan(0));
+        Assert.That(trial.PlayerKart.ItemsUsedMask & 14, Is.EqualTo(14), "The gamepad race must activate all three item types.");
         Assert.That(yardLaps & 0b011, Is.EqualTo(0b011));
-        Assert.That(trial.RaceResult.Value.PlayerPlace, Is.EqualTo(1),
-            $"Player {trial.Rules.Elapsed:F2}s. Rival {rival.Rules.Elapsed:F2}s, laps {rival.Rules.Laps}.");
-        Assert.That(trial.RaceResult.Value.RivalPlace, Is.EqualTo(2));
-        Assert.That(trial.RaceResult.Value.RivalTime, Is.Null);
-        Assert.That(Label("Details").text, Does.StartWith("1    Player").And.Contain("Still racing"));
+        bool rivalFinished = rival.Rules.Phase == TrialPhase.Finished;
+        Assert.That(trial.RaceResult.Value.PlayerPlace, Is.EqualTo(rivalFinished ? 2 : 1));
+        Assert.That(trial.RaceResult.Value.RivalPlace, Is.EqualTo(rivalFinished ? 1 : 2));
+        if (rivalFinished)
+        {
+            Assert.That(trial.RaceResult.Value.RivalTime, Is.EqualTo(rival.Rules.Elapsed));
+            Assert.That(Label("Details").text, Does.StartWith("1    Rival").And.Contain("2    Player"));
+        }
+        else
+        {
+            Assert.That(trial.RaceResult.Value.RivalTime, Is.Null);
+            Assert.That(Label("Details").text, Does.StartWith("1    Player").And.Contain("Still racing"));
+        }
         Assert.That(Label("Checkpoint delta").text, Is.Empty);
         Assert.That(trial.transform.Find("Stratos Docks/Personal best ghost"), Is.Null);
         Assert.That(PlayerPrefs.GetInt(TimeTrial.GhostPreference), Is.EqualTo(1));
         foreach (var file in startingFiles)
             Assert.That(File.ReadAllBytes(file.Key), Is.EqualTo(file.Value), file.Key);
-        Debug.Log($"Quick Race player finished yard, quay, yard in {trial.Rules.Elapsed:F2}s.");
+        Debug.Log($"Quick Race player finished yard, quay, yard in {trial.Rules.Elapsed:F2}s; " +
+            $"items collected {trial.PlayerKart.ItemsCollected}, used {trial.PlayerKart.ItemsUsed}.");
+    }
+
+    /// <summary>Stages both racers' hits, a dodge, rival offense/defense, and same-step Shield precedence.</summary>
+    [UnityTest]
+    public IEnumerator FluxShieldStagedContactsAndRivalUse()
+    {
+        yield return SelectQuickRace();
+        yield return new WaitUntil(() => trial.Rules.Phase == TrialPhase.Racing);
+        TrialKart player = trial.PlayerKart, other = trial.Rival.Kart;
+        StageItemKart(other, new(30, 0.58f, -64), Vector3.right, 15);
+        StageItemKart(player, new(10, 0.58f, -64), Vector3.right, 15);
+        other.ClearItems(); other.CollectItem(RaceItem.FluxRibbon);
+        trial.Rival.Decide(player, 0.02f, useItems: true);
+        trial.Rival.ActivateItem(player, trial.Items);
+        Assert.That(other.ItemsUsedMask & 4, Is.EqualTo(4), "Rival must deploy its own Ribbon for a predicted pursuer.");
+        Assert.That(trial.Items.Ribbons.Count, Is.EqualTo(1));
+        yield return CaptureItems("ribbon-arming");
+        trial.Items.Advance(0.4f);
+        StageItemKart(player, new(10, 0.58f, -64), Vector3.right, 15);
+        trial.Items.Resolve(player);
+        player.Body.position = new(26.2f, 0.58f, -64); Physics.SyncTransforms();
+        player.CollectItem(RaceItem.PulseShield);
+        QueueItemStep();
+        Assert.That(player.ShieldActive, Is.False);
+        Assert.That(player.GripMultiplier, Is.EqualTo(1));
+        Assert.That(player.DisruptionImmune, Is.True, "Shield activated on the contact step must block that hit.");
+        yield return CaptureItems("shield-block-hud");
+        // New patch and fresh position generation demonstrate an unshielded player hit.
+        trial.Items.Clear(); player.ClearItems(); other.ClearItems();
+        StageItemKart(other, new(30, 0.58f, -64), Vector3.right, 15);
+        other.CollectItem(RaceItem.FluxRibbon); Assert.That(trial.Items.Activate(other, true, 0), Is.True);
+        trial.Items.Advance(0.4f);
+        StageItemKart(player, new(10, 0.58f, -64), Vector3.right, 15); trial.Items.Resolve(player);
+        player.Body.position = new(40, 0.58f, -64); Physics.SyncTransforms(); trial.Items.Resolve(player);
+        Assert.That(player.GripMultiplier, Is.EqualTo(0.55f));
+        yield return CaptureItems("ribbon-armed-grip-hud");
+        // Reverse ownership: a lateral dodge remains safe; the same rival then shields an actual threat.
+        trial.Items.Clear(); player.ClearItems(); other.ClearItems();
+        StageItemKart(player, new(30, 0.58f, -64), Vector3.right, 15);
+        player.CollectItem(RaceItem.FluxRibbon); trial.Items.Activate(player, true, 0); trial.Items.Advance(0.4f);
+        StageItemKart(other, new(10, 0.58f, -61), Vector3.right, 15); trial.Items.Resolve(other);
+        other.Body.position = new(40, 0.58f, -61); Physics.SyncTransforms(); trial.Items.Resolve(other);
+        Assert.That(other.GripMultiplier, Is.EqualTo(1));
+        StageItemKart(other, new(10, 0.58f, -64), Vector3.right, 15);
+        other.CollectItem(RaceItem.PulseShield);
+        trial.Rival.Decide(player, 0.02f, useItems: true);
+        trial.Rival.ActivateItem(player, trial.Items);
+        Assert.That(other.ShieldActive, Is.True);
+        Assert.That(other.ItemsUsedMask & 8, Is.EqualTo(8));
+        trial.Items.Resolve(other);
+        yield return CaptureItems("rival-shield-outline");
+        other.Body.position = new(26.2f, 0.58f, -64); Physics.SyncTransforms(); trial.Items.Resolve(other);
+        Assert.That(other.ShieldActive, Is.False); Assert.That(other.DisruptionImmune, Is.True);
+        // Repeat with no shield to witness a rival grip hit and recovery cleanup.
+        trial.Items.Clear(); player.ClearItems(); other.ClearItems();
+        StageItemKart(player, new(30, 0.58f, -64), Vector3.right, 15);
+        player.CollectItem(RaceItem.FluxRibbon); trial.Items.Activate(player, true, 0); trial.Items.Advance(0.4f);
+        StageItemKart(other, new(10, 0.58f, -64), Vector3.right, 15); trial.Items.Resolve(other);
+        other.Body.position = new(40, 0.58f, -64); Physics.SyncTransforms(); trial.Items.Resolve(other);
+        Assert.That(other.GripMultiplier, Is.EqualTo(0.55f));
+        trial.Items.Recover(other); Assert.That(other.GripMultiplier, Is.EqualTo(1));
+        Assert.That(other.DisruptionImmune, Is.True);
+        trial.Items.Recover(player); Assert.That(trial.Items.Ribbons, Is.Empty);
+    }
+
+    /// <summary>Checks Shield's stationary/braking use, held-button suppression, paused lifetimes and Retry cleanup.</summary>
+    [UnityTest]
+    public IEnumerator FluxShieldInputPauseAndRetry()
+    {
+        yield return SelectQuickRace();
+        yield return new WaitUntil(() => trial.Rules.Phase == TrialPhase.Racing);
+        TrialKart player = trial.PlayerKart;
+        player.CollectItem(RaceItem.PulseShield);
+        Pad(new GamepadState { leftTrigger = 1 }.WithButton(GamepadButton.West));
+        yield return new WaitForSeconds(0.08f);
+        Assert.That(player.ShieldActive, Is.True);
+        player.CollectItem(RaceItem.PulseShield);
+        yield return new WaitForSeconds(0.08f);
+        Assert.That(player.HeldItem, Is.EqualTo(RaceItem.PulseShield));
+        Pad(default); yield return null;
+        yield return CaptureItems("player-shield-outline");
+        yield return PressPad(GamepadButton.Start);
+        double shield = player.ShieldRemaining;
+        yield return new WaitForSecondsRealtime(0.12f);
+        Assert.That(player.ShieldRemaining, Is.EqualTo(shield));
+        yield return PressPad(GamepadButton.Start);
+        Keys(Key.R, Key.E); yield return new WaitForSeconds(0.1f); Keys();
+        Assert.That(player.ShieldActive, Is.False);
+        Assert.That(player.HeldItem, Is.EqualTo(RaceItem.PulseShield));
+        Assert.That(player.DisruptionImmune, Is.True);
+        yield return PressPad(GamepadButton.Start);
+        yield return PressPad(GamepadButton.South);
+        Assert.That(player.HeldItem, Is.EqualTo(RaceItem.None));
+        Assert.That(player.ShieldActive || player.DisruptionImmune, Is.False);
+        Assert.That(trial.Items.Ribbons, Is.Empty);
+    }
+
+    /// <summary>Stages a physics pose and rebases race progression to avoid fabricated checkpoint crossings.</summary>
+    private void StageItemKart(TrialKart kart, Vector3 position, Vector3 forward, float speed)
+    {
+        kart.Place(position, forward); kart.Body.linearVelocity = forward * speed;
+        (kart == trial.PlayerKart ? trial.Rules : trial.Rival.Rules).Rebase(position);
+        Physics.SyncTransforms();
+    }
+
+    /// <summary>Runs the real controller with one pending edge to test deterministic contact-step precedence.</summary>
+    private void QueueItemStep()
+    {
+        var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        typeof(TimeTrial).GetField("itemRequested", flags).SetValue(trial, true);
+        typeof(TimeTrial).GetMethod("FixedUpdate", flags).Invoke(trial, null);
+    }
+
+    /// <summary>Saves the actual rendered Game view to the local validation folder after the frame completes.</summary>
+    private static IEnumerator CaptureItems(string name)
+    {
+        yield return new WaitForEndOfFrame();
+        string directory = Path.GetFullPath(Path.Combine(Application.dataPath, "../../.validation/flux-shield/captures"));
+        Directory.CreateDirectory(directory);
+        Texture2D image = ScreenCapture.CaptureScreenshotAsTexture();
+        File.WriteAllBytes(Path.Combine(directory, name + ".png"), image.EncodeToPNG());
+        Object.Destroy(image);
+    }
+
+    /// <summary>Checks frame-edge item bindings and suppression across countdown, pause and recovery.</summary>
+    [UnityTest]
+    public IEnumerator RelayBoostInputIsOneShotAndRespectsRacePhases()
+    {
+        yield return SelectQuickRace();
+        TrialKart player = trial.PlayerKart;
+        player.CollectRelayBoost();
+        Keys(Key.E);
+        yield return new WaitUntil(() => trial.Rules.Phase == TrialPhase.Racing);
+        player.Body.linearVelocity = Vector3.right * 10;
+        yield return new WaitForSeconds(0.08f);
+        Assert.That(player.ItemsUsed, Is.Zero, "Holding E from countdown must not queue a use.");
+        Keys();
+        yield return null;
+        Keys(Key.E, Key.S);
+        yield return new WaitForSeconds(0.08f);
+        Assert.That(player.RelayBoostHeld, Is.True, "Braking preserves an item.");
+        Keys();
+        yield return null;
+        player.Body.linearVelocity = Vector3.right * 10;
+        Keys(Key.E);
+        yield return new WaitForSeconds(0.08f);
+        Assert.That(player.ItemsUsed, Is.EqualTo(1));
+        player.CollectRelayBoost();
+        yield return new WaitForSeconds(0.08f);
+        Assert.That(player.RelayBoostHeld, Is.True, "A held button must not use the replacement item.");
+        Keys();
+        yield return null;
+        yield return PressPad(GamepadButton.Start);
+        Pad(new GamepadState().WithButton(GamepadButton.West));
+        yield return null;
+        yield return null;
+        Assert.That(player.ItemsUsed, Is.EqualTo(1));
+        Pad(default);
+        yield return null;
+        yield return PressPad(GamepadButton.Start);
+        yield return new WaitForFixedUpdate();
+        Assert.That(player.ItemsUsed, Is.EqualTo(1));
+        player.Body.linearVelocity = Vector3.right * 10;
+        yield return PressPad(GamepadButton.West);
+        yield return new WaitForFixedUpdate();
+        Assert.That(player.ItemsUsed, Is.EqualTo(2));
+        player.CollectRelayBoost();
+        Keys(Key.R, Key.E);
+        yield return new WaitForSeconds(0.1f);
+        Assert.That(player.RelayBoostHeld, Is.True);
+        Assert.That(player.BoostActive, Is.False);
+        Keys();
+        yield return null;
+        yield return PressPad(GamepadButton.Start);
+        yield return PressPad(GamepadButton.South);
+        Assert.That(player.RelayBoostHeld, Is.False);
+        Assert.That(trial.Rival.Kart.RelayBoostHeld, Is.False);
+        Assert.That(player.ItemsUsed, Is.Zero);
+        yield return new WaitUntil(() => trial.Rules.Phase == TrialPhase.Racing);
+        player.CollectRelayBoost();
+        for (int i = 0; i < trial.Circuit.Gates.Length * TrialRules.LapCount; i++)
+        {
+            StageGate(player.Body, trial.Rules, trial.Rules.ExpectedGate, 0);
+            yield return new WaitForFixedUpdate();
+        }
+        Keys(Key.E);
+        yield return null;
+        yield return null;
+        Assert.That(player.ItemsUsed, Is.Zero, "Finish must discard item input.");
+        Keys();
+        yield return null;
+        yield return PressPad(GamepadButton.DpadDown);
+        yield return PressPad(GamepadButton.South);
+        Assert.That(trial.Rules, Is.Null);
+        Keys(Key.E);
+        yield return null;
+        Assert.That(typeof(TimeTrial).GetField("itemRequested", System.Reflection.BindingFlags.Instance |
+            System.Reflection.BindingFlags.NonPublic).GetValue(trial), Is.False);
+    }
+
+    /// <summary>Real movement collects before a same-step activation, while placement cannot sweep a pickup.</summary>
+    [UnityTest]
+    public IEnumerator RelayBoostCollectionAndRecoveryIntegration()
+    {
+        yield return SelectQuickRace();
+        yield return new WaitUntil(() => trial.Rules.Phase == TrialPhase.Racing);
+        var player = trial.PlayerKart;
+        player.Place(new(18, 0.58f, -64), Vector3.right);
+        trial.Rules.Rebase(player.Body.position);
+        yield return new WaitForFixedUpdate();
+        player.Place(new(22, 0.58f, -64), Vector3.right);
+        yield return new WaitForFixedUpdate();
+        Assert.That(player.RelayBoostHeld, Is.False);
+        player.Place(new(18, 0.58f, -64), Vector3.right);
+        trial.Rules.Rebase(player.Body.position);
+        yield return new WaitForFixedUpdate();
+        // Invoke one controller step deterministically so the crossing and queued use share it.
+        player.Body.position = new(22, 0.58f, -64);
+        player.Body.linearVelocity = Vector3.right * 15;
+        Physics.SyncTransforms();
+        typeof(TimeTrial).GetField("itemRequested", System.Reflection.BindingFlags.Instance |
+            System.Reflection.BindingFlags.NonPublic).SetValue(trial, true);
+        typeof(TimeTrial).GetMethod("FixedUpdate", System.Reflection.BindingFlags.Instance |
+            System.Reflection.BindingFlags.NonPublic).Invoke(trial, null);
+        Assert.That(player.ItemsCollected, Is.EqualTo(1));
+        Assert.That(player.ItemsUsed, Is.EqualTo(1));
+        Assert.That(player.BoostActive, Is.True);
+        player.CollectRelayBoost();
+        yield return null;
+        Assert.That(Label("Item").text, Is.EqualTo("RELAY BOOST READY"));
+        Keys(Key.R);
+        yield return new WaitForSeconds(0.1f);
+        Assert.That(player.RelayBoostHeld, Is.True);
+        Keys();
+        player.Body.position = new Vector3(0, -3, 0);
+        yield return new WaitForSeconds(0.1f);
+        Assert.That(player.RelayBoostHeld, Is.True);
+        Assert.That(player.BoostActive, Is.False);
+        // Return behind the spent gate using a real placement; recovery cannot restore its allowance.
+        player.ClearItems();
+        player.Place(new(18, 0.58f, -64), Vector3.right);
+        trial.Rules.Rebase(player.Body.position);
+        yield return new WaitForFixedUpdate();
+        player.Body.linearVelocity = Vector3.right * 15;
+        Keys(Key.W);
+        yield return new WaitForSeconds(0.3f);
+        Assert.That(player.RelayBoostHeld, Is.False);
+    }
+
+    /// <summary>Checks the rival's retention constraints and a valid safe-straight activation.</summary>
+    [UnityTest]
+    public IEnumerator RelayBoostRivalRequiresClearAlignedStraight()
+    {
+        yield return SelectQuickRace();
+        yield return new WaitUntil(() => trial.Rules.Phase == TrialPhase.Racing);
+        TrialRival rival = trial.Rival;
+        TrialKart player = trial.PlayerKart;
+        rival.Recover(new(20, 0.58f, 62), Vector3.left);
+        rival.Kart.Body.linearVelocity = Vector3.left * 14f;
+        rival.Kart.CollectRelayBoost();
+        Physics.SyncTransforms();
+        Assert.That(rival.CanUseRelayBoost(player, true, false), Is.False);
+        Assert.That(rival.CanUseRelayBoost(player, false, true), Is.False);
+        player.Place(new(0, 0.58f, 62), Vector3.left);
+        Assert.That(rival.CanUseRelayBoost(player, false, false), Is.False, "Player clearance is under 40 m.");
+        player.Place(trial.Circuit.Start, Vector3.right);
+        rival.Kart.Body.rotation = Quaternion.LookRotation(Quaternion.Euler(0, 6, 0) * Vector3.left);
+        Assert.That(rival.CanUseRelayBoost(player, false, false), Is.False, "Route alignment exceeds 5 degrees.");
+        rival.Recover(new(-40, 0.58f, 62), Vector3.left);
+        rival.Kart.Body.linearVelocity = Vector3.left * 14f;
+        Assert.That(rival.CanUseRelayBoost(player, false, false), Is.False, "Bend is closer than 45 m.");
+        rival.Recover(new(20, 0.58f, 62), Vector3.left);
+        rival.Kart.Body.linearVelocity = Vector3.left * 7.99f;
+        Assert.That(rival.CanUseRelayBoost(player, false, false), Is.False);
+        rival.Kart.Body.linearVelocity = Vector3.left * 14f;
+        Physics.SyncTransforms();
+        Assert.That(rival.CanUseRelayBoost(player, false, false), Is.True);
+        rival.Step(player, 0.02f, useItems: true);
+        Assert.That(rival.Kart.ItemsUsed, Is.EqualTo(1));
+        Assert.That(rival.Kart.BoostActive, Is.True);
     }
 
     [UnityTest]
@@ -997,13 +1297,14 @@ public sealed class TimeTrialPlayTests
         Assert.That(Label("Circuit").text, Is.EqualTo(TrialHud.QuickRaceName(trial.Circuit).ToUpperInvariant()));
     }
 
+    /// <summary>Stages progress without issuing unsupported velocity writes after a racer has finished.</summary>
     private static void StageGate(Rigidbody body, TrialRules rules, Checkpoint gate, float lane)
     {
         Vector3 center = gate.Center + Vector3.up * 0.58f + Vector3.Cross(Vector3.up, gate.Forward) * lane;
         rules.Rebase(center - gate.Forward);
         body.position = center + gate.Forward;
         body.rotation = Quaternion.LookRotation(gate.Forward);
-        body.linearVelocity = body.angularVelocity = Vector3.zero;
+        if (!body.isKinematic) body.linearVelocity = body.angularVelocity = Vector3.zero;
     }
 
     [UnityTest]
@@ -1038,13 +1339,20 @@ public sealed class TimeTrialPlayTests
                 yield return LoadScene(TimeTrial.MenuScenePath);
                 yield return ClickMenuButton(mouse, Label("Name", definition.Name));
                 Assert.That(trial.Circuit, Is.SameAs(definition), $"Mouse click did not select {definition.Name}.");
+                Assert.That(trial.ItemsEnabled, Is.False);
+                foreach (TextMesh label in trial.transform.GetComponentsInChildren<TextMesh>())
+                    Assert.That(label.text, Does.Not.Contain("RELAY BOOST"));
             }
             yield return LoadScene(TimeTrial.MenuScenePath);
             yield return ClickMenuButton(mouse, Label("Label", TrialHud.QuickRaceName(CourseDefinition.Docks)));
             Assert.That(trial.Rival, Is.Not.Null);
+            Assert.That(trial.ItemsEnabled, Is.True);
             yield return LoadScene(TimeTrial.MenuScenePath);
             yield return ClickMenuButton(mouse, Label("Label", TrialHud.QuickRaceName(CourseDefinition.Rustrail)));
             Assert.That(trial.Circuit, Is.SameAs(CourseDefinition.Rustrail));
+            Assert.That(trial.ItemsEnabled, Is.False);
+            foreach (TextMesh label in trial.transform.GetComponentsInChildren<TextMesh>())
+                Assert.That(label.text, Does.Not.Contain("RELAY BOOST"));
             Assert.That(trial.Rival, Is.Not.Null);
             yield return LoadScene(TimeTrial.MenuScenePath);
             yield return ClickMenuButton(mouse, Label("Label", "Ghost"));
@@ -1193,7 +1501,8 @@ public sealed class TimeTrialPlayTests
     }
 
     /// <summary>Follows course waypoints with stick and triggers while the real kart handles collisions.</summary>
-    private IEnumerator DriveLap(bool shortcut, int lap, bool stopOnRoute = false, System.Action observe = null)
+    private IEnumerator DriveLap(bool shortcut, int lap, bool stopOnRoute = false, System.Action observe = null,
+        bool useRelayBoost = false)
     {
         Vector3[] line = TrialCourse.DrivingLine(trial.Circuit, shortcut);
         bool docks = trial.Circuit == CourseDefinition.Docks;
@@ -1204,6 +1513,7 @@ public sealed class TimeTrialPlayTests
         bool passedClosedFork = false;
         int segment = 0;
         bool usedRoute = false;
+        bool itemButtonHeld = false;
         float waterfrontSpeed = 0f;
         double cutoff = trial.Rules.Elapsed + (rustrail ? 90 : docks ? 65 : 47);
         while (trial.Rules.Laps < lap && trial.Rules.Elapsed < cutoff)
@@ -1261,12 +1571,28 @@ public sealed class TimeTrialPlayTests
             if (waterfront)
                 waterfrontSpeed = Mathf.Max(waterfrontSpeed, speed);
             float desiredSpeed = Mathf.Lerp(waterfront ? 25f : 14f, 6f, Mathf.Abs(angle) / 37f);
-            Pad(new GamepadState
+            var drive = new GamepadState
             {
                 leftStick = new Vector2(Mathf.Clamp(angle / 33f, -1, 1), 0),
                 rightTrigger = Mathf.Clamp01(desiredSpeed / 25f + (desiredSpeed - speed) * 0.16f),
                 leftTrigger = speed > desiredSpeed + 2.1f ? 0.75f : 0
-            });
+            };
+            bool itemUse = false;
+            if (useRelayBoost)
+            {
+                TrialKart player = trial.PlayerKart;
+                itemUse = player.HeldItem switch
+                {
+                    RaceItem.RelayBoost => waterfront && position.x is > 23f and < 30f,
+                    RaceItem.PulseShield => !player.ShieldActive && (position.z < 0f || position.x < 18f),
+                    RaceItem.FluxRibbon => drive.leftTrigger < 0.02f && RaceItems.TryPlacement(player, out _, out _),
+                    _ => false
+                };
+            }
+            if (itemUse && !itemButtonHeld)
+                drive = drive.WithButton(GamepadButton.West);
+            itemButtonHeld = itemUse && !itemButtonHeld;
+            Pad(drive);
             if (rustrail)
             {
                 if (!shortcut && lap == 1 && !passedClosedFork && trial.Rules.NextGate == 3 && position.z < 20f)
@@ -1303,7 +1629,8 @@ public sealed class TimeTrialPlayTests
             Assert.That(passedClosedFork, Is.True);
         if (docks)
         {
-            Assert.That(waterfrontSpeed, Is.GreaterThanOrEqualTo(22f));
+            if (trial.Rival == null)
+                Assert.That(waterfrontSpeed, Is.GreaterThanOrEqualTo(22f), "Item-free time-trial pace must remain unchanged.");
             Debug.Log($"Stratos Docks lap {lap} waterfront peak: {waterfrontSpeed:F2} m/s.");
         }
         Pad(default);

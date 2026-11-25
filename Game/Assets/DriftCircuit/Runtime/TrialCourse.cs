@@ -226,6 +226,36 @@ namespace DriftCircuit
         {
             Checkpoint gate = definition.Gates[index];
             Material marker = gateMaterials[index] = Paint(0x5debdc, true);
+            BuildGate(gate, marker, index == definition.Gates.Length - 1);
+        }
+
+        /// <summary>Reuses the non-solid checkpoint gantry and existing text presentation for pickups.</summary>
+        internal void BuildRelayGates()
+        {
+            foreach (Checkpoint gate in RelayBoostPickups.Gates)
+            {
+                Material color = gate.Name == "PULSE SHIELD" ? Paint(0x34f4ff, true) :
+                    gate.Name == "FLUX RIBBON" ? Paint(0xf04be8, true) : amber;
+                BuildGate(gate, color, false);
+                var label = new GameObject(gate.Name + " label");
+                label.transform.SetParent(root, false);
+                label.transform.SetPositionAndRotation(gate.Center + Vector3.up * 3.35f,
+                    Quaternion.LookRotation(gate.Forward));
+                var text = label.AddComponent<TextMesh>();
+                Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                text.font = font;
+                text.GetComponent<MeshRenderer>().sharedMaterial = font.material;
+                text.text = gate.Name;
+                text.anchor = TextAnchor.MiddleCenter;
+                text.characterSize = 0.22f;
+                text.fontSize = 48;
+                text.color = color.color;
+            }
+        }
+
+        /// <summary>Builds a non-solid bounded gate, with checkers only at the lap finish.</summary>
+        private void BuildGate(Checkpoint gate, Material marker, bool finish)
+        {
             Vector3 right = Vector3.Cross(Vector3.up, gate.Forward);
             Quaternion rotation = Quaternion.LookRotation(gate.Forward);
             float width = gate.HalfWidth;
@@ -233,7 +263,7 @@ namespace DriftCircuit
                 Cube(gate.Name + " pylon", gate.Center + right * width * side + Vector3.up * 1.9f,
                     new(0.34f, 3.8f, 0.42f), rotation, marker);
             Cube(gate.Name + " header", gate.Center + Vector3.up * 3.75f, new(width * 2, 0.23f, 0.4f), rotation, marker);
-            if (index == definition.Gates.Length - 1)
+            if (finish)
             {
                 for (int stripe = 0; stripe < 12; stripe++)
                 {
