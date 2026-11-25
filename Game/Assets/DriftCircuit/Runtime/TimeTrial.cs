@@ -51,7 +51,7 @@ namespace DriftCircuit
                 Path.Combine(Application.persistentDataPath, "time-trial-records"));
             showGhost = PlayerPrefs.GetInt(GhostPreference, 1) != 0;
             hud = new TrialHud(transform, TogglePause, Retry, OpenTrackSelect, StartCircuit,
-                () => StartCircuit(CourseDefinition.Docks, quickRace: true), ToggleGhost);
+                definition => StartCircuit(definition, quickRace: true), ToggleGhost);
             if (startAtTrackSelect)
                 OpenTrackSelect();
             else
@@ -240,20 +240,21 @@ namespace DriftCircuit
                 }
             }
 
-            course.UpdateCrossing(Rules.Elapsed, kart);
+            bool rivalReady = Rival?.Rules.Phase == TrialPhase.Racing;
+            if (rivalReady && (rivalOutOfBounds || Rival.NeedsRecovery))
+            {
+                rivalReady = TryRespawn(Rival.Kart, Rival.Rules, kart, out Vector3 respawn, out Vector3 forward);
+                if (rivalReady)
+                    Rival.Recover(respawn, forward);
+            }
+            // Both recovery attempts precede occupancy checks and all driving input.
+            course.UpdateCrossing(Rules.Elapsed, kart,
+                Rival?.Rules.Phase == TrialPhase.Racing ? Rival.Kart : null);
             if (!outOfBounds)
                 kart.Step(input.Throttle.ReadValue<float>(), input.Brake.ReadValue<float>(),
                     input.Steer.ReadValue<float>(), input.Drift.IsPressed(), kart.Grounded, Time.fixedDeltaTime);
-
-            if (Rival?.Rules.Phase != TrialPhase.Racing)
-                return;
-            if (rivalOutOfBounds || Rival.NeedsRecovery)
-            {
-                if (!TryRespawn(Rival.Kart, Rival.Rules, kart, out Vector3 respawn, out Vector3 forward))
-                    return;
-                Rival.Recover(respawn, forward);
-            }
-            Rival.Step(kart, Time.fixedDeltaTime);
+            if (rivalReady)
+                Rival.Step(kart, Time.fixedDeltaTime, course.Crossing);
         }
 
         private static void Sample(TrialRules rules, TrialKart racer, bool outOfBounds)
@@ -355,7 +356,7 @@ namespace DriftCircuit
             Rules.Restart(start);
             PlaceKart(start, Circuit.StartForward);
             Rival?.Restart(Circuit.Start - gridSide, Circuit.StartForward);
-            course.UpdateCrossing(Rules.Elapsed, kart);
+            course.UpdateCrossing(Rules.Elapsed, kart, Rival?.Kart);
             ghost?.Refresh(null, 0, 0, false);
             kart.Freeze();
             course.ShowExpected(0);

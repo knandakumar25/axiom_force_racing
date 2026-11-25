@@ -10,7 +10,7 @@ namespace DriftCircuit
     internal sealed class RailCrossing
     {
         internal static readonly Vector3 BarrierCenter = new(-90, 0.65f, -12);
-        private static readonly Vector3 BarrierSize = new(7.2f, 1.3f, 0.55f);
+        internal static readonly Vector3 BarrierSize = new(7.2f, 1.3f, 0.55f);
         private static readonly Color[] SignalColors =
         {
             new(0.39f, 1f, 0.71f), new(1f, 0.82f, 0.32f), new(1f, 0.48f, 0.43f)
@@ -54,10 +54,14 @@ namespace DriftCircuit
         }
 
         /// <summary>Changes both signs and the solid barrier, deferring a new closure while occupied.</summary>
-        internal void Update(double elapsed, Bounds kartBounds)
+        internal bool Closed => phase == CrossingPhase.Closed;
+
+        internal void Update(double elapsed, Bounds kartBounds, Bounds? rivalBounds = null)
         {
             CrossingPhase next = ScheduledPhase(elapsed);
-            if (next == CrossingPhase.Closed && phase != CrossingPhase.Closed && barrierBounds.Intersects(kartBounds))
+            if (next == CrossingPhase.Closed && phase != CrossingPhase.Closed &&
+                (barrierBounds.Intersects(kartBounds) ||
+                 (rivalBounds.HasValue && barrierBounds.Intersects(rivalBounds.Value))))
                 next = CrossingPhase.Closing;
             if (next == phase)
                 return;

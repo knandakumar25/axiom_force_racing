@@ -16,6 +16,7 @@ namespace DriftCircuit
 
         /// <summary>Parents the crossing labels alongside the generated road and signs.</summary>
         internal Transform Root => root;
+        internal RailCrossing Crossing => crossing;
 
         /// <summary>Creates shared materials and records them for scene teardown.</summary>
         public TrialCourse(CourseDefinition definition, Transform root, List<Object> owned)
@@ -65,10 +66,10 @@ namespace DriftCircuit
         }
 
         /// <summary>Applies the crossing phase when this circuit has a timed shortcut.</summary>
-        internal void UpdateCrossing(double elapsed, TrialKart kart)
+        internal void UpdateCrossing(double elapsed, TrialKart kart, TrialKart rival = null)
         {
             if (crossing != null)
-                crossing.Update(elapsed, kart.PhysicsBounds);
+                crossing.Update(elapsed, kart.PhysicsBounds, rival?.PhysicsBounds);
         }
 
         /// <summary>Lights the next valid gate while leaving the other markers visible.</summary>

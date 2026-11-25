@@ -25,6 +25,27 @@ public sealed class TrialRulesTests
         Assert.That(result.RivalTime, Is.EqualTo(rivalTime));
     }
 
+    [TestCase(0, 47, false, true)]
+    [TestCase(6, 47, false, true)]
+    [TestCase(7, 47, false, false)]
+    [TestCase(12, 6, false, true)]
+    [TestCase(12, 12, false, false)]
+    [TestCase(14, 0, false, false)]
+    [TestCase(15, 0, false, false)]
+    [TestCase(23.99949, 0, false, false)]
+    [TestCase(23.9995, 47, false, true)]
+    [TestCase(24, 47, false, true)]
+    [TestCase(0, 47, true, false)]
+    public void RustrailRouteChoiceRequiresScheduledClearanceAndFreeApproach(
+        double elapsed, float distance, bool occupied, bool expected)
+    {
+        Bounds player = new(occupied ? new Vector3(-90, 0.58f, 4) : Vector3.zero, new Vector3(1.46f, 0.71f, 2.45f));
+        Assert.That(TrialRival.CanTakeCrossing(elapsed, distance, player), Is.EqualTo(expected));
+        // Bounds touching the decision or barrier end still occupy the approach.
+        player.center = new Vector3(-84, 0.58f, 33);
+        Assert.That(TrialRival.CanTakeCrossing(0, 47, player), Is.False);
+    }
+
     /// <summary>Checks both sides of the phase boundaries and the recurring cycle.</summary>
     [Test]
     public void CrossingScheduleRoundsToMillisecondsBeforeWrapping()

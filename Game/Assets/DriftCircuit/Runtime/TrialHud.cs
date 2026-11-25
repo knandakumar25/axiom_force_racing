@@ -9,7 +9,7 @@ namespace DriftCircuit
     /// <summary>Displays timing, handling, countdown, and the pause and result cards.</summary>
     internal sealed class TrialHud
     {
-        internal const string QuickRaceName = "Quick Race · Stratos Docks";
+        internal static string QuickRaceName(CourseDefinition circuit) => "Quick Race · " + circuit.Name;
         private static readonly Color Ink = new(0.035f, 0.07f, 0.11f, 0.94f);
         private static readonly Color Aqua = new(0.4f, 1f, 0.85f);
         private static readonly Color Gold = new(1f, 0.8f, 0.4f);
@@ -28,7 +28,7 @@ namespace DriftCircuit
 
         /// <summary>Creates the screen-space HUD and binds its pointer buttons.</summary>
         public TrialHud(Transform parent, Action onResume, Action onRetry, Action onTrackSelect,
-            Action<CourseDefinition> onStart, Action onQuickRace, Action onGhostToggle)
+            Action<CourseDefinition> onStart, Action<CourseDefinition> onQuickRace, Action onGhostToggle)
         {
             var screen = new GameObject("Time trial HUD", typeof(RectTransform), typeof(Canvas),
                 typeof(CanvasScaler), typeof(GraphicRaycaster));
@@ -84,15 +84,15 @@ namespace DriftCircuit
 
             RectTransform trackScreen = Fill("Track select", canvas, new Color(0.025f, 0.045f, 0.075f));
             menu = trackScreen.gameObject;
-            const float trackRowPitch = 94f;
-            const float trackRowHeight = 78f;
-            const float bottomTrackRow = 198f;
+            const float trackRowPitch = 83f;
+            const float trackRowHeight = 72f;
+            const float bottomTrackRow = 245f;
             float topTrackRow = bottomTrackRow + (CourseDefinition.All.Length - 1) * trackRowPitch;
             RectTransform trackCard = Panel("Circuits", trackScreen, center, Vector2.zero,
                 new(580, topTrackRow + trackRowHeight + 112f), Ink);
             Label("Game title", trackCard, topLeft, new(30, -17), new(520, 48), 37, Color.white).text = "DRIFT CIRCUIT";
             Label("Track select title", trackCard, topLeft, new(30, -68), new(520, 32), 19, Aqua).text = "SELECT A CIRCUIT";
-            trackButtons = new Button[CourseDefinition.All.Length + 2];
+            trackButtons = new Button[CourseDefinition.All.Length + 3];
             trackRecords = new Text[CourseDefinition.All.Length];
             for (int i = 0; i < CourseDefinition.All.Length; i++)
             {
@@ -104,7 +104,10 @@ namespace DriftCircuit
                 trackRecords[i] = Label("Personal bests", row, topLeft, new(18, -43), new(481, 25), 16, Ink);
                 trackButtons[i] = button;
             }
-            trackButtons[^2] = Button(QuickRaceName, trackCard, new(30, 132), new(520, 48), onQuickRace);
+            trackButtons[^3] = Button(QuickRaceName(CourseDefinition.Docks), trackCard, new(30, 187), new(520, 44),
+                () => onQuickRace(CourseDefinition.Docks));
+            trackButtons[^2] = Button(QuickRaceName(CourseDefinition.Rustrail), trackCard, new(30, 132), new(520, 44),
+                () => onQuickRace(CourseDefinition.Rustrail));
             Button ghostToggle = Button("Ghost", trackCard, new(30, 66), new(520, 48), onGhostToggle);
             ghostLabel = ghostToggle.GetComponentInChildren<Text>();
             trackButtons[^1] = ghostToggle;
@@ -141,7 +144,8 @@ namespace DriftCircuit
             menu.SetActive(false);
             raceHud.SetActive(true);
             quickRace = isQuickRace;
-            circuit.text = (quickRace ? QuickRaceName : definition.Name).ToUpperInvariant();
+            circuit.fontSize = quickRace ? 14 : 18;
+            circuit.text = (quickRace ? QuickRaceName(definition) : definition.Name).ToUpperInvariant();
             previousPhase = (TrialPhase)(-1);
         }
 

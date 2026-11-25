@@ -787,15 +787,214 @@ public sealed class TimeTrialPlayTests
         Assert.That(Label("Details").text, Does.Contain("Shared first"));
     }
 
-    private IEnumerator SelectQuickRace()
+    [UnityTest, Timeout(180000)]
+    public IEnumerator RustrailQuickRaceRivalFinishesUnaidedWithin200Seconds()
+    {
+        yield return SelectQuickRace(true);
+        yield return new WaitUntil(() => trial.Rules.Phase == TrialPhase.Racing);
+        var rival = trial.Rival;
+        int crossingLaps = 0, switchbackLaps = 0;
+        while (rival.Rules.Phase == TrialPhase.Racing && trial.Rules.Elapsed <= 200)
+        {
+            Vector3 position = rival.Kart.Body.position;
+            if ((position - new Vector3(-90, position.y, -12)).sqrMagnitude < 9f)
+                crossingLaps |= 1 << rival.Rules.Laps;
+            if ((position - new Vector3(-46, position.y, -2)).sqrMagnitude < 9f)
+                switchbackLaps |= 1 << rival.Rules.Laps;
+            yield return new WaitForFixedUpdate();
+        }
+        Assert.That(rival.Rules.Laps, Is.EqualTo(3), $"Rival {rival.Kart.Body.position}, gate {rival.Rules.NextGate}, recoveries {rival.Recoveries}");
+        Assert.That(crossingLaps | switchbackLaps, Is.EqualTo(7));
+        Assert.That(rival.Recoveries, Is.Zero);
+        Assert.That(rival.Rules.Elapsed, Is.LessThanOrEqualTo(200));
+        Assert.That(rival.Kart.Body.gameObject.activeInHierarchy, Is.False);
+        Debug.Log($"Rustrail rival: {rival.Rules.Elapsed:F2}s, crossing laps {crossingLaps}, switchback laps {switchbackLaps}, zero recoveries.");
+    }
+
+    [UnityTest, Timeout(180000)]
+    public IEnumerator RustrailQuickRaceGamepadUsesBothRoutesAndPreservesRecords()
+    {
+        PlayerPrefs.SetInt(TimeTrial.GhostPreference, 0);
+        var startingFiles = new System.Collections.Generic.Dictionary<string, byte[]>();
+        foreach (CourseDefinition definition in CourseDefinition.All)
+        {
+            SeedGhost(definition, gateInterval: 60);
+            string path = Path.Combine(recordDirectory, $"{definition.Id}-r{definition.Revision}.json");
+            startingFiles.Add(path, File.ReadAllBytes(path));
+        }
+        yield return SelectQuickRace(true);
+        yield return new WaitUntil(() => trial.Rules.Phase == TrialPhase.Racing);
+        int witnesses = 0;
+        void Observe()
+        {
+            Vector3 position = trial.Rival.Kart.Body.position;
+            if (position.y > 0.3f && (position - new Vector3(-90, position.y, -12)).sqrMagnitude < 9f)
+                witnesses |= 1;
+            if (position.y > 0.3f && (position - new Vector3(-46, position.y, -2)).sqrMagnitude < 9f)
+                witnesses |= 2;
+        }
+        yield return DriveLap(false, 1, observe: Observe);
+        yield return DriveLap(true, 2, observe: Observe);
+        yield return DriveLap(false, 3, observe: Observe);
+        Assert.That(trial.Rules.Phase, Is.EqualTo(TrialPhase.Finished));
+        Assert.That(trial.Rules.LapSplit(2), Is.GreaterThan(0));
+        Assert.That(witnesses, Is.Not.Zero);
+        Assert.That(trial.Rival.Recoveries, Is.Zero);
+        Assert.That(PlayerPrefs.GetInt(TimeTrial.GhostPreference), Is.Zero);
+        foreach (var file in startingFiles)
+            Assert.That(File.ReadAllBytes(file.Key), Is.EqualTo(file.Value), file.Key);
+        Debug.Log($"Rustrail Quick Race gamepad: {trial.Rules.Elapsed:F2}s; rival route witnesses {witnesses}.");
+        yield return null;
+        yield return PressPad(GamepadButton.South);
+        Assert.That(trial.Rules.Elapsed + trial.Rival.Rules.Elapsed, Is.Zero);
+        Assert.That(trial.Rival.CrossingChoice, Is.Null);
+        Assert.That(trial.Rival.WaitingForCrossing, Is.False);
+        AssertCrossing("OPEN", false);
+        yield return PressPad(GamepadButton.Start);
+        yield return PressPad(GamepadButton.DpadUp);
+        yield return PressPad(GamepadButton.South);
+        Assert.That(trial.Rules, Is.Null);
+        Assert.That(trial.Rival, Is.Null);
+    }
+
+    [UnityTest]
+    public IEnumerator RustrailQuickRaceDefersClosureForEitherKartAndBoth()
+    {
+        yield return SelectQuickRace(true);
+        yield return new WaitUntil(() => trial.Rules.Phase == TrialPhase.Racing);
+        var rival = trial.Rival;
+        Vector3 barrier = new(-90, 0.58f, -12);
+        Vector3 safe = new(-84, 0.58f, 50);
+        for (int occupants = 1; occupants <= 3; occupants++)
+        {
+            SetRaceCycle(14.9);
+            PlaceForCrossingCheck((occupants & 1) != 0 ? barrier + Vector3.right : safe, Vector3.back);
+            rival.Recover((occupants & 2) != 0 ? barrier + Vector3.left : safe + Vector3.right * 4, Vector3.back);
+            yield return new WaitForFixedUpdate();
+            SetRaceCycle(15.1);
+            yield return new WaitForFixedUpdate();
+            AssertCrossing("CLOSING", false);
+            PlaceForCrossingCheck(safe, Vector3.back);
+            rival.Recover(safe + Vector3.right * 4, Vector3.back);
+            yield return new WaitForFixedUpdate();
+            AssertCrossing("CLOSED", true);
+        }
+    }
+
+    [UnityTest, Timeout(60000)]
+    public IEnumerator RustrailQuickRaceCommitsBothRoutesAndRecoversBeforeFork()
+    {
+        yield return SelectQuickRace(true);
+        yield return new WaitUntil(() => trial.Rules.Phase == TrialPhase.Racing);
+        var rival = trial.Rival;
+        for (int route = 0; route < 3; route++)
+        {
+            bool shortcut = route == 0;
+            SetRaceCycle(shortcut || route == 2 ? 0 : 16);
+            PlaceForCrossingCheck(route == 2 ? new(-90, 0.58f, 5) : trial.Circuit.Start, Vector3.back);
+            rival.Recover(new(-84, 0.58f, 32.1f), Vector3.back);
+            rival.Kart.Body.position = new(-84, 0.58f, 31.9f);
+            rival.Kart.Body.transform.SetPositionAndRotation(rival.Kart.Body.position, rival.Kart.Body.rotation);
+            rival.Rules.Rebase(rival.Kart.Body.position);
+            yield return new WaitForFixedUpdate();
+            Assert.That(rival.CrossingChoice, Is.EqualTo(shortcut));
+            Vector3 witness = shortcut ? new(-90, 0, -12) : new(-46, 0, -2);
+            double deadline = trial.Rules.Elapsed + 16;
+            while ((new Vector3(rival.Kart.Body.position.x, 0, rival.Kart.Body.position.z) - witness).sqrMagnitude >= 9f && trial.Rules.Elapsed < deadline)
+            {
+                Assert.That(rival.CrossingChoice, Is.EqualTo(shortcut), "The committed route must not change as the schedule advances.");
+                yield return new WaitForFixedUpdate();
+            }
+            Assert.That(trial.Rules.Elapsed, Is.LessThan(deadline), $"Missed route {route}: {rival.Kart.Body.position}");
+            rival.Recover(new(-84, 0.58f, 40), Vector3.back);
+            Assert.That(rival.CrossingChoice, Is.Null);
+            Assert.That(rival.NeedsRecovery || rival.WaitingForCrossing, Is.False);
+        }
+        // Let the controller recover from the branch to the last accepted approach gate.
+        for (int gate = 0; gate < 3; gate++)
+        {
+            StageGate(rival.Kart.Body, rival.Rules, trial.Circuit.Gates[gate], 0);
+            yield return new WaitForFixedUpdate();
+        }
+        Assert.That(rival.Rules.LastGate, Is.EqualTo(2));
+        rival.Recover(new(-84, 0.58f, 32.1f), Vector3.back);
+        rival.Kart.Body.position = new(-84, 0.58f, 31.9f);
+        rival.Kart.Body.transform.SetPositionAndRotation(rival.Kart.Body.position, rival.Kart.Body.rotation);
+        yield return new WaitForFixedUpdate();
+        Assert.That(rival.CrossingChoice.HasValue, Is.True);
+        int beforeRecovery = rival.Recoveries;
+        double elapsed = rival.Rules.Elapsed;
+        rival.Kart.Place(new(-90, -3, 4), Vector3.back);
+        yield return new WaitForFixedUpdate();
+        Assert.That(rival.Recoveries, Is.EqualTo(beforeRecovery + 1));
+        Assert.That(rival.Kart.Body.position.z, Is.EqualTo(40).Within(0.05));
+        Assert.That(rival.Rules.LastGate, Is.EqualTo(2));
+        Assert.That(rival.Rules.NextGate, Is.EqualTo(3));
+        Assert.That(rival.Rules.Elapsed, Is.GreaterThan(elapsed));
+        Assert.That(rival.CrossingChoice, Is.Null);
+        Assert.That(rival.WaitingForCrossing || rival.NeedsRecovery, Is.False);
+    }
+
+    [UnityTest, Timeout(60000)]
+    public IEnumerator RustrailQuickRaceDelayedCrossingWaitsThroughClosureAndPause()
+    {
+        yield return SelectQuickRace(true);
+        yield return new WaitUntil(() => trial.Rules.Phase == TrialPhase.Racing);
+        var rival = trial.Rival;
+        PlaceForCrossingCheck(trial.Circuit.Start, Vector3.right);
+        rival.Recover(new(-84, 0.58f, 32.1f), Vector3.back);
+        rival.Kart.Body.position = new(-84, 0.58f, 31.9f);
+        rival.Kart.Body.transform.SetPositionAndRotation(rival.Kart.Body.position, rival.Kart.Body.rotation);
+        rival.Rules.Rebase(rival.Kart.Body.position);
+        yield return new WaitForFixedUpdate();
+        Assert.That(rival.CrossingChoice, Is.True);
+        // Stage a contact delay after commitment, keeping the route decision.
+        rival.Kart.Place(new(-90, 0.58f, 1), Vector3.back);
+        rival.Rules.Rebase(rival.Kart.Body.position);
+        SetRaceCycle(16);
+        int recoveries = rival.Recoveries;
+        yield return new WaitForSeconds(3);
+        Assert.That(rival.CrossingChoice, Is.True);
+        Assert.That(rival.WaitingForCrossing, Is.True);
+        Assert.That(rival.Kart.PhysicsBounds.min.z, Is.GreaterThan(-11.725f));
+        Assert.That(rival.Recoveries, Is.EqualTo(recoveries));
+        yield return PressPad(GamepadButton.Start);
+        double before = trial.Rules.Elapsed;
+        Vector3 stopped = rival.Kart.Body.position;
+        yield return new WaitForSecondsRealtime(0.1f);
+        Assert.That(trial.Rules.Elapsed, Is.EqualTo(before));
+        Assert.That(rival.Kart.Body.position, Is.EqualTo(stopped));
+        AssertCrossing("CLOSED", true);
+        yield return PressPad(GamepadButton.Start);
+        while (rival.Kart.Body.position.z > -16f && trial.Rules.Elapsed < 30)
+            yield return new WaitForFixedUpdate();
+        Assert.That(rival.Kart.Body.position.z, Is.LessThan(-16f));
+        Assert.That(rival.Recoveries, Is.EqualTo(recoveries));
+        Assert.That(rival.WaitingForCrossing, Is.False);
+    }
+
+    private void SetRaceCycle(double cycle)
+    {
+        double elapsed = trial.Rules.Elapsed;
+        double target = System.Math.Floor(elapsed / 24d) * 24d + cycle;
+        if (target < elapsed) target += 24d;
+        trial.Rules.Tick((float)(target - elapsed), trial.KartBody.position);
+        trial.Rival.Rules.Tick((float)(target - trial.Rival.Rules.Elapsed), trial.Rival.Kart.Body.position);
+    }
+
+    private IEnumerator SelectQuickRace(bool rustrail = false)
     {
         yield return LoadScene(TimeTrial.MenuScenePath);
-        for (int i = 0; i < CourseDefinition.All.Length; i++)
+        for (int i = 0; i < CourseDefinition.All.Length + (rustrail ? 1 : 0); i++)
             yield return PressPad(GamepadButton.DpadDown);
         yield return PressPad(GamepadButton.South);
-        Assert.That(trial.Circuit, Is.SameAs(CourseDefinition.Docks));
+        Assert.That(trial.Circuit, Is.SameAs(rustrail ? CourseDefinition.Rustrail : CourseDefinition.Docks));
         Assert.That(trial.Rival, Is.Not.Null);
-        Assert.That(Label("Circuit").text, Is.EqualTo("QUICK RACE · STRATOS DOCKS"));
+        Assert.That(trial.KartBody.position, Is.EqualTo(trial.Circuit.Start + Vector3.back * 1.6f));
+        Assert.That(trial.Rival.Kart.Body.position, Is.EqualTo(trial.Circuit.Start + Vector3.forward * 1.6f));
+        Assert.That(Vector3.Angle(trial.Rival.Kart.Body.rotation * Vector3.forward, Vector3.right), Is.LessThan(0.01f));
+        Assert.That(Label("Circuit").preferredWidth, Is.LessThanOrEqualTo(Label("Circuit").rectTransform.rect.width));
+        Assert.That(Label("Circuit").text, Is.EqualTo(TrialHud.QuickRaceName(trial.Circuit).ToUpperInvariant()));
     }
 
     private static void StageGate(Rigidbody body, TrialRules rules, Checkpoint gate, float lane)
@@ -811,7 +1010,7 @@ public sealed class TimeTrialPlayTests
     public IEnumerator AllTrackSelectControlsAreReachable()
     {
         string[] names = { "Little Tokyo–Skyport", "Concrete Wards Viaduct", "Stratos Docks", "Rustrail Junction",
-            TrialHud.QuickRaceName, "Ghost" };
+            TrialHud.QuickRaceName(CourseDefinition.Docks), TrialHud.QuickRaceName(CourseDefinition.Rustrail), "Ghost" };
         for (int device = 0; device < 2; device++)
         {
             yield return LoadScene(TimeTrial.MenuScenePath);
@@ -841,7 +1040,11 @@ public sealed class TimeTrialPlayTests
                 Assert.That(trial.Circuit, Is.SameAs(definition), $"Mouse click did not select {definition.Name}.");
             }
             yield return LoadScene(TimeTrial.MenuScenePath);
-            yield return ClickMenuButton(mouse, Label("Label", TrialHud.QuickRaceName));
+            yield return ClickMenuButton(mouse, Label("Label", TrialHud.QuickRaceName(CourseDefinition.Docks)));
+            Assert.That(trial.Rival, Is.Not.Null);
+            yield return LoadScene(TimeTrial.MenuScenePath);
+            yield return ClickMenuButton(mouse, Label("Label", TrialHud.QuickRaceName(CourseDefinition.Rustrail)));
+            Assert.That(trial.Circuit, Is.SameAs(CourseDefinition.Rustrail));
             Assert.That(trial.Rival, Is.Not.Null);
             yield return LoadScene(TimeTrial.MenuScenePath);
             yield return ClickMenuButton(mouse, Label("Label", "Ghost"));
