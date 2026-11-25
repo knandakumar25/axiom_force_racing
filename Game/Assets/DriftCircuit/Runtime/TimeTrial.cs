@@ -5,7 +5,7 @@ using UnityEngine;
 
 namespace DriftCircuit
 {
-    /// <summary>Runs the track menu and standalone offline time trials.</summary>
+    /// <summary>Runs Track Select, offline time trials, and Quick Race.</summary>
     public sealed class TimeTrial : MonoBehaviour
     {
         public const string ScenePath = "Assets/DriftCircuit/Scenes/LittleTokyoSkyportTimeTrial.unity";
@@ -36,6 +36,8 @@ namespace DriftCircuit
         private bool resetRequested;
 
         internal CourseDefinition Circuit { get; private set; }
+        internal TrialRival Rival { get; private set; }
+        internal QuickRaceResult? RaceResult { get; private set; }
         public TrialRules Rules { get; private set; }
         public Rigidbody KartBody => kart?.Body;
         public bool BoostReady => kart?.BoostReady ?? false;
@@ -48,14 +50,17 @@ namespace DriftCircuit
             records = new TrialRecordStore(RecordDirectoryOverride ??
                 Path.Combine(Application.persistentDataPath, "time-trial-records"));
             showGhost = PlayerPrefs.GetInt(GhostPreference, 1) != 0;
-            hud = new TrialHud(transform, TogglePause, Retry, OpenTrackSelect, StartCircuit, ToggleGhost);
+            hud = new TrialHud(transform, TogglePause, Retry, OpenTrackSelect, StartCircuit,
+                () => StartCircuit(CourseDefinition.Docks, quickRace: true), ToggleGhost);
             if (startAtTrackSelect)
                 OpenTrackSelect();
             else
                 StartCircuit(CourseDefinition.Tokyo);
         }
 
-        private void StartCircuit(CourseDefinition definition)
+        private void StartCircuit(CourseDefinition definition) => StartCircuit(definition, quickRace: false);
+
+        private void StartCircuit(CourseDefinition definition, bool quickRace)
         {
             Circuit = definition;
             raceRoot = new GameObject(definition.Name);
@@ -63,12 +68,18 @@ namespace DriftCircuit
             course = new TrialCourse(definition, raceRoot.transform, owned);
             course.Build();
             Rules = new TrialRules(definition.Gates, definition.Start);
-            BuildKart();
+            kart = BuildKart("Player kart", 0x18a4b9, out _);
+            if (quickRace)
+            {
+                TrialKart rivalKart = BuildKart("Rival kart", 0xf05a27, out Material tailLights);
+                Rival = new TrialRival(definition, rivalKart, tailLights);
+            }
+            else
+                ghost = new TrialGhost(raceRoot.transform, kart.Body.transform, GhostMaterial());
             BuildView();
-            ghost = new TrialGhost(raceRoot.transform, kart.Body.transform, GhostMaterial());
-            hud.ShowCircuit(definition);
+            hud.ShowCircuit(definition, quickRace);
             BeginCountdown();
-            hud.Refresh(Rules, kart, false, checkpointDelta, result);
+            RefreshHud();
         }
 
         private void OpenTrackSelect()
@@ -83,6 +94,8 @@ namespace DriftCircuit
             Rules = null;
             Circuit = null;
             kart = null;
+            Rival = null;
+            RaceResult = null;
             ghost = null;
             comparison = null;
             poses.Clear();
@@ -107,7 +120,7 @@ namespace DriftCircuit
             input?.Disable();
             if (ownsPause)
             {
-                Rules.TogglePause();
+                ToggleRacePhases();
                 RestoreTimeScale();
             }
         }
@@ -148,8 +161,10 @@ namespace DriftCircuit
                 return;
             if (Rules.Phase == TrialPhase.Racing)
                 shownGo = Mathf.Max(0f, shownGo - Time.deltaTime);
-            hud.Refresh(Rules, kart, shownGo > 0f, checkpointDelta, result);
+            RefreshHud();
         }
+
+        private void RefreshHud() => hud.Refresh(Rules, kart, shownGo > 0f, checkpointDelta, result, RaceResult);
 
         /// <summary>Advances countdown or applies the racing step, including respawn and gate checks.</summary>
         private void FixedUpdate()
@@ -159,56 +174,111 @@ namespace DriftCircuit
             if (Rules.Phase == TrialPhase.Countdown)
             {
                 Rules.Tick(Time.fixedDeltaTime, kart.Body.position);
+                Rival?.Rules.Tick(Time.fixedDeltaTime, Rival.Kart.Body.position);
                 if (Rules.Phase == TrialPhase.Racing)
                 {
                     kart.Body.isKinematic = false;
+                    if (Rival != null)
+                        Rival.Kart.Body.isKinematic = false;
+                    else
+                        CapturePose();
                     shownGo = 0.75f;
-                    CapturePose();
                 }
                 return;
             }
             if (Rules.Phase != TrialPhase.Racing)
                 return;
 
-            Vector3 position = kart.Body.position;
-            bool outOfBounds = position.y < -1.35f || position.sqrMagnitude > 125f * 125f;
-            if (outOfBounds)
-                Rules.Rebase(position);
+            bool outOfBounds = kart.OutOfBounds;
             int oldGate = Rules.NextGate;
             int oldLap = Rules.Laps;
-            Rules.Tick(Time.fixedDeltaTime, position);
+            Sample(Rules, kart, outOfBounds);
             if (Rules.NextGate != oldGate || Rules.Laps != oldLap)
             {
-                checkpointTimes.Add(Rules.Elapsed);
-                if (comparison != null)
-                    checkpointDelta = Rules.Elapsed - comparison.Checkpoints[oldLap * Circuit.Gates.Length + oldGate];
+                if (Rival == null)
+                {
+                    checkpointTimes.Add(Rules.Elapsed);
+                    if (comparison != null)
+                        checkpointDelta = Rules.Elapsed - comparison.Checkpoints[oldLap * Circuit.Gates.Length + oldGate];
+                }
                 course.ShowExpected(Rules.NextGate);
             }
-            if (!outOfBounds)
+            if (Rival == null && !outOfBounds)
                 CapturePose();
+            bool rivalOutOfBounds = false;
+            if (Rival?.Rules.Phase == TrialPhase.Racing)
+            {
+                rivalOutOfBounds = Rival.Kart.OutOfBounds;
+                Sample(Rival.Rules, Rival.Kart, rivalOutOfBounds);
+                if (Rival.Rules.Phase == TrialPhase.Finished)
+                    Rival.Retire();
+            }
             if (Rules.Phase == TrialPhase.Finished)
             {
-                kart.Body.linearVelocity = Vector3.zero;
-                kart.Body.angularVelocity = Vector3.zero;
-                kart.Body.isKinematic = true;
-                result = records.SaveResult(Circuit, Rules, checkpointTimes.ToArray(), poses.ToArray());
+                kart.Freeze();
+                if (Rival == null)
+                    result = records.SaveResult(Circuit, Rules, checkpointTimes.ToArray(), poses.ToArray());
+                else
+                {
+                    Rival.Kart.Freeze();
+                    RaceResult = new QuickRaceResult(Rules.Elapsed,
+                        Rival.Rules.Phase == TrialPhase.Finished ? Rival.Rules.Elapsed : null);
+                }
                 return;
             }
 
             // Account for legitimate movement before a manual reset, then rebase at the new position.
             if (resetRequested || outOfBounds)
             {
-                resetRequested = false;
-                var respawn = Circuit.Respawn(Rules.LastGate);
-                PlaceKart(respawn.Position, respawn.Forward);
-                CapturePose(reset: true);
+                if (TryRespawn(kart, Rules, Rival?.Kart, out Vector3 respawn, out Vector3 forward))
+                {
+                    resetRequested = false;
+                    outOfBounds = false;
+                    PlaceKart(respawn, forward);
+                    if (Rival == null)
+                        CapturePose(reset: true);
+                }
             }
 
             course.UpdateCrossing(Rules.Elapsed, kart);
-            Vector3 groundProbe = kart.Body.position - Vector3.up * 0.20f;
-            bool grounded = Physics.Raycast(groundProbe, Vector3.down, 0.55f, 1 << 0, QueryTriggerInteraction.Ignore);
-            kart.Step(input.Throttle.ReadValue<float>(), input.Brake.ReadValue<float>(),
-                input.Steer.ReadValue<float>(), input.Drift.IsPressed(), grounded, Time.fixedDeltaTime);
+            if (!outOfBounds)
+                kart.Step(input.Throttle.ReadValue<float>(), input.Brake.ReadValue<float>(),
+                    input.Steer.ReadValue<float>(), input.Drift.IsPressed(), kart.Grounded, Time.fixedDeltaTime);
+
+            if (Rival?.Rules.Phase != TrialPhase.Racing)
+                return;
+            if (rivalOutOfBounds || Rival.NeedsRecovery)
+            {
+                if (!TryRespawn(Rival.Kart, Rival.Rules, kart, out Vector3 respawn, out Vector3 forward))
+                    return;
+                Rival.Recover(respawn, forward);
+            }
+            Rival.Step(kart, Time.fixedDeltaTime);
+        }
+
+        private static void Sample(TrialRules rules, TrialKart racer, bool outOfBounds)
+        {
+            Vector3 position = racer.Body.position;
+            if (outOfBounds)
+                rules.Rebase(position);
+            rules.Tick(Time.fixedDeltaTime, position);
+        }
+
+        private bool TryRespawn(TrialKart racer, TrialRules rules, TrialKart other,
+            out Vector3 position, out Vector3 forward)
+        {
+            var respawn = Circuit.Respawn(rules.LastGate);
+            position = respawn.Position;
+            forward = respawn.Forward;
+            Quaternion rotation = Quaternion.LookRotation(forward);
+            Vector3 side = Vector3.Cross(Vector3.up, forward) * 2.4f;
+            if (!racer.OverlapsAt(position, rotation, other))
+                return true;
+            position = respawn.Position + side;
+            if (!racer.OverlapsAt(position, rotation, other))
+                return true;
+            position = respawn.Position - side;
+            return !racer.OverlapsAt(position, rotation, other);
         }
 
         private void CapturePose(bool reset = false) =>
@@ -219,7 +289,7 @@ namespace DriftCircuit
         {
             if (Rules == null)
                 return;
-            if (Rules.Phase != TrialPhase.Paused)
+            if (ghost != null && Rules.Phase != TrialPhase.Paused)
             {
                 // Match the one-step interpolation used by the player body.
                 double frameOffset = System.Math.Clamp(Time.timeAsDouble - Time.fixedTimeAsDouble, 0, Time.fixedDeltaTime);
@@ -233,7 +303,7 @@ namespace DriftCircuit
         /// <summary>Freezes physics and race time while leaving menu input responsive.</summary>
         private void TogglePause()
         {
-            Rules.TogglePause();
+            ToggleRacePhases();
             if (Rules.Phase == TrialPhase.Paused)
             {
                 if (!input.Drift.IsPressed())
@@ -244,6 +314,12 @@ namespace DriftCircuit
             }
             else
                 RestoreTimeScale();
+        }
+
+        private void ToggleRacePhases()
+        {
+            Rules.TogglePause();
+            Rival?.Rules.TogglePause();
         }
 
         /// <summary>Releases the simulation pause owned by this scene.</summary>
@@ -268,16 +344,20 @@ namespace DriftCircuit
             RestoreTimeScale();
             resetRequested = false;
             shownGo = 0f;
-            comparison = records.Load(Circuit);
+            comparison = Rival == null ? records.Load(Circuit) : null;
             checkpointDelta = null;
             result = RecordResult.None;
+            RaceResult = null;
             checkpointTimes.Clear();
             poses.Clear();
-            Rules.Restart(Circuit.Start);
-            PlaceKart(Circuit.Start, Circuit.StartForward);
+            Vector3 gridSide = Vector3.Cross(Vector3.up, Circuit.StartForward) * TrialRival.GridOffset;
+            Vector3 start = Rival == null ? Circuit.Start : Circuit.Start + gridSide;
+            Rules.Restart(start);
+            PlaceKart(start, Circuit.StartForward);
+            Rival?.Restart(Circuit.Start - gridSide, Circuit.StartForward);
             course.UpdateCrossing(Rules.Elapsed, kart);
-            ghost.Refresh(null, 0, 0, false);
-            kart.Body.isKinematic = true;
+            ghost?.Refresh(null, 0, 0, false);
+            kart.Freeze();
             course.ShowExpected(0);
         }
 
@@ -304,9 +384,9 @@ namespace DriftCircuit
         }
 
         /// <summary>Creates a primitive kart and the single collider that controls its handling.</summary>
-        private void BuildKart()
+        private TrialKart BuildKart(string name, uint paintColor, out Material lights)
         {
-            var obj = new GameObject("Player kart") { layer = 2 };
+            var obj = new GameObject(name) { layer = 2 };
             obj.transform.SetParent(raceRoot.transform, false);
             var body = obj.AddComponent<Rigidbody>();
             body.mass = 175f;
@@ -324,9 +404,9 @@ namespace DriftCircuit
             collider.sharedMaterial = grip;
             owned.Add(grip);
 
-            Material paint = course.Paint(0x18a4b9);
+            Material paint = course.Paint(paintColor);
             Material rubber = course.Paint(0x121b26);
-            Material lights = course.Paint(0xffd47b, true);
+            lights = course.Paint(0xffd47b, true);
             course.Cube("Chassis", new(0, -0.12f, 0), new(1.35f, 0.4f, 2.35f), Quaternion.identity, paint, parent: obj.transform);
             course.Cube("Seat", new(0, 0.18f, -0.28f), new(0.78f, 0.42f, 0.84f), Quaternion.identity, rubber, parent: obj.transform);
             course.Cube("Rear lights", new(0, -0.06f, -1.18f), new(1.15f, 0.11f, 0.1f), Quaternion.identity, lights, parent: obj.transform);
@@ -342,7 +422,7 @@ namespace DriftCircuit
                 tire.GetComponent<Renderer>().sharedMaterial = rubber;
                 tire.GetComponent<Collider>().enabled = false;
             }
-            kart = new TrialKart(body, collider);
+            return new TrialKart(body, collider);
         }
 
         private Material GhostMaterial()

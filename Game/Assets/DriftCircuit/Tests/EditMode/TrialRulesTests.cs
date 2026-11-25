@@ -11,6 +11,20 @@ public sealed class TrialRulesTests
         new("Finish", new Vector3(0, 0, 20), Vector3.forward, 3)
     };
 
+    [TestCase(100.00, 100.02, 1, 2)]
+    [TestCase(100.02, 100.00, 2, 1)]
+    [TestCase(100.00, 100.00, 1, 1)]
+    [TestCase(100.00, null, 1, 2)]
+    public void QuickRacePlacesUseFixedStepFinishTimes(double playerTime, double? rivalTime,
+        int playerPlace, int rivalPlace)
+    {
+        var result = new QuickRaceResult(playerTime, rivalTime);
+        Assert.That(result.PlayerPlace, Is.EqualTo(playerPlace));
+        Assert.That(result.RivalPlace, Is.EqualTo(rivalPlace));
+        Assert.That(result.PlayerTime, Is.EqualTo(playerTime));
+        Assert.That(result.RivalTime, Is.EqualTo(rivalTime));
+    }
+
     /// <summary>Checks both sides of the phase boundaries and the recurring cycle.</summary>
     [Test]
     public void CrossingScheduleRoundsToMillisecondsBeforeWrapping()

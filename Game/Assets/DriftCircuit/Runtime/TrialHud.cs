@@ -9,6 +9,7 @@ namespace DriftCircuit
     /// <summary>Displays timing, handling, countdown, and the pause and result cards.</summary>
     internal sealed class TrialHud
     {
+        internal const string QuickRaceName = "Quick Race · Stratos Docks";
         private static readonly Color Ink = new(0.035f, 0.07f, 0.11f, 0.94f);
         private static readonly Color Aqua = new(0.4f, 1f, 0.85f);
         private static readonly Color Gold = new(1f, 0.8f, 0.4f);
@@ -22,11 +23,12 @@ namespace DriftCircuit
         private readonly Text ghostLabel;
         private Button[] activeButtons;
         private int selected;
+        private bool quickRace;
         private TrialPhase previousPhase = (TrialPhase)(-1);
 
         /// <summary>Creates the screen-space HUD and binds its pointer buttons.</summary>
         public TrialHud(Transform parent, Action onResume, Action onRetry, Action onTrackSelect,
-            Action<CourseDefinition> onStart, Action onGhostToggle)
+            Action<CourseDefinition> onStart, Action onQuickRace, Action onGhostToggle)
         {
             var screen = new GameObject("Time trial HUD", typeof(RectTransform), typeof(Canvas),
                 typeof(CanvasScaler), typeof(GraphicRaycaster));
@@ -84,13 +86,13 @@ namespace DriftCircuit
             menu = trackScreen.gameObject;
             const float trackRowPitch = 94f;
             const float trackRowHeight = 78f;
-            const float bottomTrackRow = 136f;
+            const float bottomTrackRow = 198f;
             float topTrackRow = bottomTrackRow + (CourseDefinition.All.Length - 1) * trackRowPitch;
             RectTransform trackCard = Panel("Circuits", trackScreen, center, Vector2.zero,
                 new(580, topTrackRow + trackRowHeight + 112f), Ink);
             Label("Game title", trackCard, topLeft, new(30, -17), new(520, 48), 37, Color.white).text = "DRIFT CIRCUIT";
             Label("Track select title", trackCard, topLeft, new(30, -68), new(520, 32), 19, Aqua).text = "SELECT A CIRCUIT";
-            trackButtons = new Button[CourseDefinition.All.Length + 1];
+            trackButtons = new Button[CourseDefinition.All.Length + 2];
             trackRecords = new Text[CourseDefinition.All.Length];
             for (int i = 0; i < CourseDefinition.All.Length; i++)
             {
@@ -102,6 +104,7 @@ namespace DriftCircuit
                 trackRecords[i] = Label("Personal bests", row, topLeft, new(18, -43), new(481, 25), 16, Ink);
                 trackButtons[i] = button;
             }
+            trackButtons[^2] = Button(QuickRaceName, trackCard, new(30, 132), new(520, 48), onQuickRace);
             Button ghostToggle = Button("Ghost", trackCard, new(30, 66), new(520, 48), onGhostToggle);
             ghostLabel = ghostToggle.GetComponentInChildren<Text>();
             trackButtons[^1] = ghostToggle;
@@ -133,11 +136,12 @@ namespace DriftCircuit
 
         public void ShowGhostPreference(bool enabled) => ghostLabel.text = enabled ? "Ghost   ON" : "Ghost   OFF";
 
-        public void ShowCircuit(CourseDefinition definition)
+        public void ShowCircuit(CourseDefinition definition, bool isQuickRace)
         {
             menu.SetActive(false);
             raceHud.SetActive(true);
-            circuit.text = definition.Name.ToUpperInvariant();
+            quickRace = isQuickRace;
+            circuit.text = (quickRace ? QuickRaceName : definition.Name).ToUpperInvariant();
             previousPhase = (TrialPhase)(-1);
         }
 
@@ -165,11 +169,14 @@ namespace DriftCircuit
         }
 
         /// <summary>Refreshes live readings and updates the result card when its phase changes.</summary>
-        public void Refresh(TrialRules rules, TrialKart kart, bool showGo, double? checkpointDelta, RecordResult result)
+        public void Refresh(TrialRules rules, TrialKart kart, bool showGo, double? checkpointDelta,
+            RecordResult result, QuickRaceResult? quickResult)
         {
+            bool finished = rules.Phase == TrialPhase.Finished;
+            string finishTitle = quickRace ? "QUICK RACE COMPLETE" : "TIME TRIAL COMPLETE";
             lap.text = $"LAP {Math.Min(rules.Laps + 1, TrialRules.LapCount)} / {TrialRules.LapCount}";
             timer.text = Format(rules.Elapsed);
-            nextGate.text = rules.Phase == TrialPhase.Finished ? "TIME TRIAL COMPLETE" : "NEXT  " + rules.ExpectedGate.Name;
+            nextGate.text = finished ? finishTitle : "NEXT  " + rules.ExpectedGate.Name;
             delta.text = checkpointDelta.HasValue
                 ? $"PB  {(checkpointDelta.Value < 0 ? "−" : "+")}{Math.Abs(checkpointDelta.Value):0.000}s" : "";
             delta.color = checkpointDelta > 0 ? Gold : Aqua;
@@ -186,14 +193,16 @@ namespace DriftCircuit
                 return;
             previousPhase = rules.Phase;
             bool paused = rules.Phase == TrialPhase.Paused;
-            bool finished = rules.Phase == TrialPhase.Finished;
             modal.SetActive(paused || finished);
             resume.gameObject.SetActive(paused);
             SetButtons(paused ? pauseButtons : finished ? resultButtons : null);
-            modalTitle.text = finished ? "TIME TRIAL COMPLETE" : "PAUSED";
-            modalBody.text = finished
-                ? $"Total     {Format(rules.Elapsed)}\nLap 1     {Format(rules.LapSplit(0))}\nLap 2     {Format(rules.LapSplit(1))}\nLap 3     {Format(rules.LapSplit(2))}"
-                : "Esc / Start   Resume";
+            modalTitle.text = finished ? finishTitle : "PAUSED";
+            if (quickResult.HasValue)
+                modalBody.text = FormatPlaces(quickResult.Value);
+            else if (finished)
+                modalBody.text = $"Total     {Format(rules.Elapsed)}\nLap 1     {Format(rules.LapSplit(0))}\nLap 2     {Format(rules.LapSplit(1))}\nLap 3     {Format(rules.LapSplit(2))}";
+            else
+                modalBody.text = "Esc / Start   Resume";
             recordStatus.text = result switch
             {
                 RecordResult.SaveFailed => "Personal best could not be saved",
@@ -202,6 +211,15 @@ namespace DriftCircuit
                 RecordResult.Total => "NEW BEST TOTAL",
                 _ => ""
             };
+        }
+
+        private static string FormatPlaces(QuickRaceResult result)
+        {
+            string player = $"{result.PlayerPlace}    Player     {Format(result.PlayerTime)}";
+            string rivalTime = result.RivalTime.HasValue ? Format(result.RivalTime.Value) : "Still racing";
+            string rival = $"{result.RivalPlace}    Rival       {rivalTime}";
+            string places = result.PlayerPlace == 2 ? $"{rival}\n{player}" : $"{player}\n{rival}";
+            return result.RivalPlace == 1 && result.PlayerPlace == 1 ? $"{places}\nShared first" : places;
         }
 
         private static string FormatBest(double? seconds) => seconds.HasValue ? Format(seconds.Value) : "—";

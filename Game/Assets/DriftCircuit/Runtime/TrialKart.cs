@@ -17,12 +17,50 @@ namespace DriftCircuit
         public bool BoostReady => charge >= 0.49999f;
         public bool BoostActive => boost > 0f;
         public float ForwardSpeed => Vector3.Dot(Body.linearVelocity, Body.rotation * Vector3.forward);
+        public bool OutOfBounds => Body.position.y < -1.35f || Body.position.sqrMagnitude > 125f * 125f;
+        public bool Grounded => Physics.Raycast(Body.position - Vector3.up * 0.20f, Vector3.down,
+            0.55f, 1 << 0, QueryTriggerInteraction.Ignore);
 
         /// <summary>Wraps the scene's interpolated kart body.</summary>
         public TrialKart(Rigidbody body, BoxCollider collider)
         {
             Body = body;
             this.collider = collider;
+        }
+
+        public bool OverlapsAt(Vector3 position, Quaternion rotation, TrialKart other) =>
+            other != null && other.Body.gameObject.activeInHierarchy &&
+            Physics.ComputePenetration(collider, position, rotation, other.collider,
+                other.Body.position, other.Body.rotation, out _, out _);
+
+        public float ClearanceAhead(Vector3 origin, Vector3 forward)
+        {
+            Vector3 offset = Body.position - origin;
+            float ahead = Vector3.Dot(offset, forward);
+            if (ahead <= 0f || Mathf.Abs(offset.y) >= collider.size.y)
+                return float.PositiveInfinity;
+
+            Vector3 right = Vector3.Cross(Vector3.up, forward);
+            Vector3 otherRight = Body.rotation * Vector3.right;
+            Vector3 otherForward = Body.rotation * Vector3.forward;
+            Vector3 half = collider.size * 0.5f;
+            float lateralExtent = half.x * Mathf.Abs(Vector3.Dot(right, otherRight))
+                + half.z * Mathf.Abs(Vector3.Dot(right, otherForward));
+            if (Mathf.Abs(Vector3.Dot(offset, right)) >= half.x + lateralExtent + 0.15f)
+                return float.PositiveInfinity;
+
+            float forwardExtent = half.x * Mathf.Abs(Vector3.Dot(forward, otherRight))
+                + half.z * Mathf.Abs(Vector3.Dot(forward, otherForward));
+            return ahead - forwardExtent - half.z;
+        }
+
+        public void Freeze()
+        {
+            if (Body.isKinematic)
+                return;
+            Body.linearVelocity = Vector3.zero;
+            Body.angularVelocity = Vector3.zero;
+            Body.isKinematic = true;
         }
 
         // The chase view uses interpolation. The crossing needs the current physics pose,

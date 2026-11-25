@@ -15,9 +15,11 @@ Stratos Docks opens eastbound on a flat waterfront straight. Follow East Pier th
 
 Rustrail Junction is the final City Cup circuit. Follow Rail Yard, Signal Approach, and Crossing Approach before choosing the left-hand switchback or the right-hand crossing. From GO, the crossing repeats a 24-second cycle. **OPEN** lasts 12 seconds, **CLOSING** warns for 3 seconds while the lane is still passable, and **CLOSED** lasts through the end of the cycle. The barrier waits for a kart occupying its path. Pausing freezes the timer, Retry opens the crossing for a new attempt, and Reset returns to the last checkpoint without restarting the cycle.
 
-## Play the time trial
+## Play
 
 Open `Assets/DriftCircuit/Scenes/TrackSelect.unity` in the Unity project and enter Play Mode. Track Select is the startup scene and shows the best lap and best total for each circuit. The original Little Tokyo scene also supports entry directly into the race.
+
+Choose **Quick Race · Stratos Docks**, below Rustrail Junction, for a three-lap offline race against the orange AI kart. You can take either route. The rival follows the loading-yard route, brakes for bends and traffic, and can make contact with your kart. If the normal reset spot is occupied, the kart tries either side and waits if neither side is free. The race clock and completed checkpoints carry through a reset.
 
 | Action | Keyboard | Gamepad |
 | --- | --- | --- |
@@ -36,6 +38,8 @@ Results show the total, all three lap splits and any new personal bests. Only a 
 
 The ghost replays the fastest completed run on the chosen circuit. It appears by default when a record exists. The track menu remembers the Ghost toggle. Checkpoint deltas compare elapsed time against the same lap and checkpoint in the saved run, even when the ghost is hidden. Negative deltas mean you are ahead.
 
+Quick Race results appear when you finish. An unfinished rival is listed second as **Still racing**, and a same-step finish shares first place. Retry restarts both karts. Ghosts, checkpoint deltas, and personal bests are time-trial features.
+
 ### Run the Unity tests
 
 With the project open in the licensed Windows Editor, run these commands from the repository root. Poll the second command until the run finishes.
@@ -45,9 +49,13 @@ unity command --project-path ./Game test run --mode all --async-tests true
 unity command --project-path ./Game test status
 ```
 
-The Play Mode suite uses virtual keyboard, gamepad and mouse input. It drives each circuit through the main route, shortcut, and main route over three laps and checks access to all four circuit rows and Ghost. The Docks race requires at least 22 m/s on the waterfront and compares the yard and quay times from Quay Approach to Finish. Rustrail tests cover the crossing schedule, the branch barrier, checkpoint recovery, the timed route comparison, and ghost playback after Retry.
+The Play Mode suite uses virtual keyboard, gamepad and mouse input. It drives each time trial through the main route, shortcut, and main route over three laps and checks access to every Track Select control. The Docks time trial requires at least 22 m/s on the waterfront and compares the yard and quay times from Quay Approach to Finish. Rustrail tests cover the crossing schedule, the branch barrier, checkpoint recovery, the timed route comparison, and ghost playback after Retry.
 
-The final Windows Unity CLI run passed 9 Edit Mode and 9 Play Mode tests with zero new Console errors or warnings. Rustrail's virtual gamepad run finished in 171.72 seconds. From Crossing Approach to Finish, the crossing took 15.40 seconds and each switchback took 20.74 seconds. Chase captures showed the advance signal from 34 metres before the fork at 43 km/h, a pass through the crossing during CLOSING, and an open switchback with the barrier down. Retry replayed the saved Rustrail ghost. The other three record files matched their starting contents.
+Quick Race tests cover the shared GO step, physical contact, pause, occupied and stuck recovery, both finish orders, a shared first, Retry, and return to Track Select. A virtual gamepad drives the player through the yard, quay, and yard and compares all four seeded time-trial record files byte for byte. A separate run checks that the rival completes three loading-yard laps within 175 seconds with zero recoveries while the player provides no driving input.
+
+The verified Quick Race gamepad run finished in 144.94 seconds. The rival completed its separate run in 143.00 seconds with zero recoveries. The full Windows Unity CLI run passed 13 Edit Mode and 14 Play Mode tests with zero new Console errors or warnings.
+
+The Rustrail milestone passed 9 Edit Mode and 9 Play Mode tests with zero new Console errors or warnings. Rustrail's virtual gamepad run finished in 171.72 seconds. From Crossing Approach to Finish, the crossing took 15.40 seconds and each switchback took 20.74 seconds. Chase captures showed the advance signal from 34 metres before the fork at 43 km/h, a pass through the crossing during CLOSING, and an open switchback with the barrier down. Retry replayed the saved Rustrail ghost. The other three record files matched their starting contents.
 
 ## Local setup
 

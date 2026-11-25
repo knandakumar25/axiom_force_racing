@@ -394,6 +394,7 @@ public sealed class TimeTrialPlayTests
         yield return PressPad(GamepadButton.Start);
 
         // Only the nose overlaps the blocking volume at the closure boundary.
+        yield return WaitForRaceTime(14.84);
         PlaceForCrossingCheck(new(-90, 0.52f, -10.7f), Vector3.back);
         yield return WaitForRaceTime(15);
         AssertCrossing("CLOSING", false);
@@ -567,14 +568,250 @@ public sealed class TimeTrialPlayTests
         Rigidbody body = trial.KartBody;
         body.position = position;
         body.rotation = Quaternion.LookRotation(forward);
+        body.transform.SetPositionAndRotation(position, body.rotation);
         body.linearVelocity = body.angularVelocity = Vector3.zero;
         trial.Rules.Rebase(position);
     }
 
     [UnityTest]
+    public IEnumerator QuickRaceStartsTogetherPausesAndMakesPhysicalContact()
+    {
+        yield return SelectQuickRace();
+        var rival = trial.Rival;
+        Rigidbody other = rival.Kart.Body;
+        Vector3 start = trial.Circuit.Start;
+        Assert.That(trial.KartBody.position, Is.EqualTo(start + Vector3.back * 1.6f));
+        Assert.That(other.position, Is.EqualTo(start + Vector3.forward * 1.6f));
+        Assert.That(Vector3.Angle(other.rotation * Vector3.forward, Vector3.right), Is.LessThan(0.01f));
+        while (trial.Rules.Phase == TrialPhase.Countdown)
+        {
+            Assert.That(other.isKinematic && trial.KartBody.isKinematic, Is.True);
+            Assert.That(rival.Rules.Countdown, Is.EqualTo(trial.Rules.Countdown));
+            yield return new WaitForFixedUpdate();
+        }
+        Assert.That(rival.Rules.Phase, Is.EqualTo(TrialPhase.Racing));
+        Assert.That(trial.Rules.Elapsed, Is.Zero);
+        Assert.That(rival.Rules.Elapsed, Is.Zero);
+        Assert.That(other.isKinematic || trial.KartBody.isKinematic, Is.False);
+
+        yield return PressPad(GamepadButton.Start);
+        Assert.That(rival.Rules.Phase, Is.EqualTo(TrialPhase.Paused));
+        Vector3 stopped = other.position;
+        double pausedAt = rival.Rules.Elapsed;
+        yield return new WaitForSecondsRealtime(0.1f);
+        Assert.That(other.position, Is.EqualTo(stopped));
+        Assert.That(rival.Rules.Elapsed, Is.EqualTo(pausedAt));
+        yield return PressPad(GamepadButton.Start);
+        Assert.That(rival.Rules.Phase, Is.EqualTo(TrialPhase.Racing));
+        Assert.That(rival.Rules.Elapsed, Is.EqualTo(trial.Rules.Elapsed));
+
+        PlaceForCrossingCheck(start + Vector3.right * 6f, Vector3.right);
+        rival.Kart.Place(start + Vector3.right * 8.55f, Vector3.right);
+        rival.Rules.Rebase(other.position);
+        trial.KartBody.linearVelocity = Vector3.right * 12f;
+        for (int step = 0; step < 5 && other.linearVelocity.x <= 2f; step++)
+            yield return new WaitForFixedUpdate();
+        Assert.That(other.linearVelocity.x, Is.GreaterThan(2f), "The player should transfer momentum to the rival.");
+        Assert.That(trial.KartBody.linearVelocity.x, Is.LessThan(10f));
+
+        yield return PressPad(GamepadButton.Start);
+        yield return PressPad(GamepadButton.DpadUp);
+        yield return PressPad(GamepadButton.South);
+        Assert.That(trial.Rules, Is.Null);
+        Assert.That(trial.Rival, Is.Null);
+        Assert.That(other == null || !other.gameObject.activeInHierarchy, Is.True);
+        Assert.That(Time.timeScale, Is.EqualTo(2f));
+    }
+
+    [UnityTest]
+    public IEnumerator QuickRaceRecoversBothKartsAndWaitsForFreePlacement()
+    {
+        yield return SelectQuickRace();
+        yield return new WaitUntil(() => trial.Rules.Phase == TrialPhase.Racing);
+        TrialRival rival = trial.Rival;
+        Rigidbody other = rival.Kart.Body;
+        Checkpoint gate = trial.Circuit.Gates[0];
+        var respawn = trial.Circuit.Respawn(0);
+        StageGate(trial.KartBody, trial.Rules, gate, 0);
+        StageGate(other, rival.Rules, gate, 3.5f);
+        yield return new WaitForFixedUpdate();
+        Assert.That(trial.Rules.LastGate, Is.Zero);
+        Assert.That(rival.Rules.LastGate, Is.Zero);
+
+        PlaceForCrossingCheck(respawn.Position, respawn.Forward);
+        BoxCollider blocker = trial.KartBody.GetComponent<BoxCollider>();
+        Vector3 originalSize = blocker.size;
+        blocker.size = new Vector3(8f, originalSize.y, originalSize.z);
+        other.position = respawn.Position - Vector3.up * 3f;
+        double before = rival.Rules.Elapsed;
+        yield return new WaitForFixedUpdate();
+        Assert.That(other.position.y, Is.LessThan(-1.35f));
+        Assert.That(rival.Recoveries, Is.Zero);
+        blocker.size = originalSize;
+        yield return new WaitForFixedUpdate();
+        Assert.That(other.position.x, Is.EqualTo(respawn.Position.x + 2.4f).Within(0.08f));
+        Assert.That(rival.Recoveries, Is.EqualTo(1));
+        Assert.That(rival.Rules.LastGate, Is.Zero);
+        Assert.That(rival.Rules.NextGate, Is.EqualTo(1));
+        Assert.That(rival.Rules.Elapsed, Is.GreaterThan(before));
+        yield return new WaitForSeconds(0.5f);
+        Assert.That(other.position.z, Is.GreaterThan(respawn.Position.z + 0.5f),
+            "The rival should drive toward the next checkpoint after rebasing its line cursor.");
+
+        rival.Kart.Place(respawn.Position, respawn.Forward);
+        rival.Rules.Rebase(other.position);
+        trial.KartBody.position = respawn.Position - Vector3.up * 3f;
+        before = trial.Rules.Elapsed;
+        yield return new WaitForFixedUpdate();
+        Assert.That(trial.KartBody.position.x, Is.EqualTo(respawn.Position.x + 2.4f).Within(0.08f));
+        Assert.That(trial.Rules.LastGate, Is.Zero);
+        Assert.That(trial.Rules.NextGate, Is.EqualTo(1));
+        Assert.That(trial.Rules.Elapsed, Is.GreaterThan(before));
+
+        // Pin the rival while its driver calls for forward movement.
+        other.constraints = RigidbodyConstraints.FreezeAll;
+        yield return new WaitUntil(() => rival.Recoveries == 2 || rival.Rules.Elapsed > before + 3f);
+        Assert.That(rival.Recoveries, Is.EqualTo(2));
+        Assert.That(rival.Rules.NextGate, Is.EqualTo(1));
+    }
+
+    [UnityTest, Timeout(180000)]
+    public IEnumerator QuickRaceRivalFinishesThreeYardLapsWithNoPlayerInput()
+    {
+        yield return SelectQuickRace();
+        yield return new WaitUntil(() => trial.Rules.Phase == TrialPhase.Racing);
+        TrialRival rival = trial.Rival;
+        Material tailLights = rival.Kart.Body.transform.Find("Rear lights").GetComponent<Renderer>().sharedMaterial;
+        bool brakedInChicane = false;
+        int yardLaps = 0;
+        while (rival.Rules.Phase == TrialPhase.Racing && trial.Rules.Elapsed <= 175)
+        {
+            Vector3 position = rival.Kart.Body.position;
+            Vector2 flat = new(position.x, position.z);
+            if (position.y > 0.3f && (flat - new Vector2(-61, -12)).sqrMagnitude < 9f)
+                yardLaps |= 1 << rival.Rules.Laps;
+            if (position.x > 70f && position.z is > -26f and < 46f)
+                brakedInChicane |= tailLights.color.r > 0.85f;
+            Assert.That((flat - new Vector2(-91, -12)).sqrMagnitude, Is.GreaterThanOrEqualTo(9f));
+            yield return new WaitForFixedUpdate();
+        }
+        Assert.That(rival.Rules.Laps, Is.EqualTo(3),
+            $"Rival position {rival.Kart.Body.position}, gate {rival.Rules.NextGate}, recoveries {rival.Recoveries}.");
+        Assert.That(yardLaps, Is.EqualTo(0b111));
+        Assert.That(brakedInChicane, Is.True, "The rival's brake light should be visible in the chicane.");
+        Assert.That(rival.Recoveries, Is.Zero);
+        Assert.That(rival.Rules.Elapsed, Is.LessThanOrEqualTo(175));
+        Assert.That(rival.Kart.Body.gameObject.activeInHierarchy, Is.False);
+        Assert.That(trial.Rules.Phase, Is.EqualTo(TrialPhase.Racing));
+        double rivalTime = rival.Rules.Elapsed;
+        Debug.Log($"Quick Race rival completed three loading-yard laps in {rivalTime:F2}s with zero recoveries.");
+
+        for (int i = 0; i < trial.Circuit.Gates.Length * TrialRules.LapCount; i++)
+        {
+            StageGate(trial.KartBody, trial.Rules, trial.Rules.ExpectedGate, 0);
+            yield return new WaitForFixedUpdate();
+        }
+        yield return null;
+        Assert.That(trial.RaceResult.Value.PlayerPlace, Is.EqualTo(2));
+        Assert.That(trial.RaceResult.Value.RivalTime, Is.EqualTo(rivalTime));
+        Assert.That(Label("Details").text, Does.StartWith("1    Rival").And.Contain("2    Player"));
+        yield return PressPad(GamepadButton.South);
+        Assert.That(trial.RaceResult, Is.Null);
+        Assert.That(trial.Rules.Phase, Is.EqualTo(TrialPhase.Countdown));
+        Assert.That(rival.Rules.Phase, Is.EqualTo(TrialPhase.Countdown));
+        Assert.That(trial.Rules.Elapsed + rival.Rules.Elapsed, Is.Zero);
+        Assert.That(trial.Rules.Laps + rival.Rules.Laps, Is.Zero);
+        Assert.That(rival.Kart.Body.gameObject.activeInHierarchy, Is.True);
+    }
+
+    [UnityTest, Timeout(180000)]
+    public IEnumerator QuickRaceVirtualGamepadTakesQuayAndPreservesTimeTrialFiles()
+    {
+        PlayerPrefs.SetInt(TimeTrial.GhostPreference, 1);
+        var startingFiles = new System.Collections.Generic.Dictionary<string, byte[]>();
+        foreach (CourseDefinition definition in CourseDefinition.All)
+        {
+            SeedGhost(definition, gateInterval: 60);
+            string path = Path.Combine(recordDirectory, $"{definition.Id}-r{definition.Revision}.json");
+            startingFiles.Add(path, File.ReadAllBytes(path));
+        }
+
+        yield return SelectQuickRace();
+        yield return new WaitUntil(() => trial.Rules.Phase == TrialPhase.Racing);
+        TrialRival rival = trial.Rival;
+        int yardLaps = 0;
+        void WatchRival()
+        {
+            Vector3 position = rival.Kart.Body.position;
+            Vector2 flat = new(position.x, position.z);
+            if (position.y > 0.3f && (flat - new Vector2(-61, -12)).sqrMagnitude < 9f)
+                yardLaps |= 1 << rival.Rules.Laps;
+            Assert.That((flat - new Vector2(-91, -12)).sqrMagnitude, Is.GreaterThanOrEqualTo(9f));
+        }
+        yield return DriveLap(false, 1, observe: WatchRival);
+        yield return DriveLap(true, 2, observe: WatchRival);
+        yield return DriveLap(false, 3, observe: WatchRival);
+        yield return null;
+
+        Assert.That(trial.Rules.Phase, Is.EqualTo(TrialPhase.Finished));
+        Assert.That(yardLaps & 0b011, Is.EqualTo(0b011));
+        Assert.That(trial.RaceResult.Value.PlayerPlace, Is.EqualTo(1),
+            $"Player {trial.Rules.Elapsed:F2}s. Rival {rival.Rules.Elapsed:F2}s, laps {rival.Rules.Laps}.");
+        Assert.That(trial.RaceResult.Value.RivalPlace, Is.EqualTo(2));
+        Assert.That(trial.RaceResult.Value.RivalTime, Is.Null);
+        Assert.That(Label("Details").text, Does.StartWith("1    Player").And.Contain("Still racing"));
+        Assert.That(Label("Checkpoint delta").text, Is.Empty);
+        Assert.That(trial.transform.Find("Stratos Docks/Personal best ghost"), Is.Null);
+        Assert.That(PlayerPrefs.GetInt(TimeTrial.GhostPreference), Is.EqualTo(1));
+        foreach (var file in startingFiles)
+            Assert.That(File.ReadAllBytes(file.Key), Is.EqualTo(file.Value), file.Key);
+        Debug.Log($"Quick Race player finished yard, quay, yard in {trial.Rules.Elapsed:F2}s.");
+    }
+
+    [UnityTest]
+    public IEnumerator QuickRaceSameTickFinishAwardsSharedFirst()
+    {
+        yield return SelectQuickRace();
+        yield return new WaitUntil(() => trial.Rules.Phase == TrialPhase.Racing);
+        TrialRival rival = trial.Rival;
+        for (int i = 0; i < trial.Circuit.Gates.Length * TrialRules.LapCount; i++)
+        {
+            StageGate(trial.KartBody, trial.Rules, trial.Rules.ExpectedGate, 1.6f);
+            StageGate(rival.Kart.Body, rival.Rules, rival.Rules.ExpectedGate, -1.6f);
+            yield return new WaitForFixedUpdate();
+        }
+        yield return null;
+        Assert.That(trial.RaceResult.Value.PlayerPlace, Is.EqualTo(1));
+        Assert.That(trial.RaceResult.Value.RivalPlace, Is.EqualTo(1));
+        Assert.That(trial.RaceResult.Value.RivalTime, Is.EqualTo(trial.RaceResult.Value.PlayerTime));
+        Assert.That(Label("Details").text, Does.Contain("Shared first"));
+    }
+
+    private IEnumerator SelectQuickRace()
+    {
+        yield return LoadScene(TimeTrial.MenuScenePath);
+        for (int i = 0; i < CourseDefinition.All.Length; i++)
+            yield return PressPad(GamepadButton.DpadDown);
+        yield return PressPad(GamepadButton.South);
+        Assert.That(trial.Circuit, Is.SameAs(CourseDefinition.Docks));
+        Assert.That(trial.Rival, Is.Not.Null);
+        Assert.That(Label("Circuit").text, Is.EqualTo("QUICK RACE · STRATOS DOCKS"));
+    }
+
+    private static void StageGate(Rigidbody body, TrialRules rules, Checkpoint gate, float lane)
+    {
+        Vector3 center = gate.Center + Vector3.up * 0.58f + Vector3.Cross(Vector3.up, gate.Forward) * lane;
+        rules.Rebase(center - gate.Forward);
+        body.position = center + gate.Forward;
+        body.rotation = Quaternion.LookRotation(gate.Forward);
+        body.linearVelocity = body.angularVelocity = Vector3.zero;
+    }
+
+    [UnityTest]
     public IEnumerator AllTrackSelectControlsAreReachable()
     {
-        string[] names = { "Little Tokyo–Skyport", "Concrete Wards Viaduct", "Stratos Docks", "Rustrail Junction", "Ghost" };
+        string[] names = { "Little Tokyo–Skyport", "Concrete Wards Viaduct", "Stratos Docks", "Rustrail Junction",
+            TrialHud.QuickRaceName, "Ghost" };
         for (int device = 0; device < 2; device++)
         {
             yield return LoadScene(TimeTrial.MenuScenePath);
@@ -603,6 +840,9 @@ public sealed class TimeTrialPlayTests
                 yield return ClickMenuButton(mouse, Label("Name", definition.Name));
                 Assert.That(trial.Circuit, Is.SameAs(definition), $"Mouse click did not select {definition.Name}.");
             }
+            yield return LoadScene(TimeTrial.MenuScenePath);
+            yield return ClickMenuButton(mouse, Label("Label", TrialHud.QuickRaceName));
+            Assert.That(trial.Rival, Is.Not.Null);
             yield return LoadScene(TimeTrial.MenuScenePath);
             yield return ClickMenuButton(mouse, Label("Label", "Ghost"));
             Assert.That(Label("Label", "Ghost").text, Is.EqualTo("Ghost   OFF"));
@@ -704,7 +944,7 @@ public sealed class TimeTrialPlayTests
         Assert.That(trial.Rules.Phase, Is.EqualTo(TrialPhase.Racing));
     }
 
-    private void SeedGhost(CourseDefinition circuit)
+    private void SeedGhost(CourseDefinition circuit, double gateInterval = 0.5)
     {
         var rules = new TrialRules(circuit.Gates, circuit.Start);
         rules.Tick(TrialRules.CountdownLength, circuit.Start);
@@ -715,7 +955,7 @@ public sealed class TimeTrialPlayTests
             foreach (Checkpoint gate in circuit.Gates)
             {
                 rules.Rebase(gate.Center - gate.Forward);
-                rules.Tick(0.5, gate.Center + gate.Forward);
+                rules.Tick(gateInterval, gate.Center + gate.Forward);
                 times[index++] = rules.Elapsed;
             }
         }
@@ -750,7 +990,7 @@ public sealed class TimeTrialPlayTests
     }
 
     /// <summary>Follows course waypoints with stick and triggers while the real kart handles collisions.</summary>
-    private IEnumerator DriveLap(bool shortcut, int lap, bool stopOnRoute = false)
+    private IEnumerator DriveLap(bool shortcut, int lap, bool stopOnRoute = false, System.Action observe = null)
     {
         Vector3[] line = TrialCourse.DrivingLine(trial.Circuit, shortcut);
         bool docks = trial.Circuit == CourseDefinition.Docks;
@@ -765,6 +1005,7 @@ public sealed class TimeTrialPlayTests
         double cutoff = trial.Rules.Elapsed + (rustrail ? 90 : docks ? 65 : 47);
         while (trial.Rules.Laps < lap && trial.Rules.Elapsed < cutoff)
         {
+            observe?.Invoke();
             if (stopOnRoute && usedRoute)
             {
                 Pad(default);
@@ -793,6 +1034,8 @@ public sealed class TimeTrialPlayTests
                 to = line[(++ahead + 1) % line.Length];
             }
             target = Vector3.MoveTowards(target, to, lookAhead);
+            if (trial.Rival != null && target.z < -62f && target.x is > -15f and < 55f)
+                target.z -= TrialRival.GridOffset * Mathf.Clamp01(Mathf.Min((target.x + 15f) / 10f, (55f - target.x) / 15f));
             Vector3 forward = body.rotation * Vector3.forward;
             float angle = Vector3.SignedAngle(forward, target - position, Vector3.up);
             float speed = Vector3.Dot(body.linearVelocity, forward);

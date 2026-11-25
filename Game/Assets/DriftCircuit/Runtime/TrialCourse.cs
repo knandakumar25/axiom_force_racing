@@ -84,7 +84,7 @@ namespace DriftCircuit
             }
         }
 
-        /// <summary>Returns the course centerline for the physical input-driven play test.</summary>
+        /// <summary>Returns the sampled course centerline for the rival and input-driven play tests.</summary>
         internal static Vector3[] DrivingLine(CourseDefinition definition, bool takeShortcut)
         {
             var stations = Sample(definition.Main, true);
