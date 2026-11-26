@@ -159,6 +159,18 @@ namespace DriftCircuit
                 east = Mathf.Abs(position.z + 40f) <= 4.0f && position.x is >= -48f and <= -18f or >= 8f and <= 30f;
                 west = Mathf.Abs(position.z - 64f) <= 4.2f && position.x is >= -40f and <= 28f;
             }
+            else if (circuit == CourseDefinition.CyberGrave)
+            {
+                east = Mathf.Abs(position.z + 62f) <= 4.0f && position.x is >= -42f and <= -18f or >= 18f and <= 46f;
+                west = Mathf.Abs(position.z - 54f) <= 4.2f && position.x is >= -38f and <= 40f;
+            }
+            else if (circuit == CourseDefinition.SpireHull || circuit == CourseDefinition.ApexDescent)
+            {
+                float eastZ = circuit == CourseDefinition.SpireHull ? -60f : -64f;
+                float westZ = circuit == CourseDefinition.SpireHull ? 58f : 60f;
+                east = Mathf.Abs(position.z + -eastZ) <= 4.0f && position.x is >= -42f and <= -18f or >= 18f and <= 44f;
+                west = Mathf.Abs(position.z - westZ) <= 4.2f && position.x is >= -38f and <= 38f;
+            }
             else
             {
                 east = Mathf.Abs(position.z + 64f) <= 4.5f &&

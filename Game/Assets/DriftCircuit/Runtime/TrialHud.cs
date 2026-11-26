@@ -19,8 +19,11 @@ namespace DriftCircuit
         private readonly EventSystem events;
         private readonly Button resume;
         private readonly Button[] trackButtons, pauseButtons, resultButtons;
-        private readonly Text[] trackRecords;
-        private readonly Text ghostLabel, beaconLabel, apiStatusLabel;
+        private readonly Text[] trackRecords, trackNames, quickNames;
+        private readonly Button[] trialButtons, quickButtons;
+        private readonly Text ghostLabel, beaconLabel, apiStatusLabel, cupLabel, authLabel, boardBody;
+        private readonly GameObject boardModal;
+        private CourseDefinition[] currentCircuits = CourseDefinition.All;
         private Button[] activeButtons;
         private int selected;
         private bool quickRace;
@@ -31,7 +34,7 @@ namespace DriftCircuit
         /// <summary>Creates the screen-space HUD and binds its pointer buttons.</summary>
         public TrialHud(Transform parent, Action onResume, Action onRetry, Action onTrackSelect,
             Action<CourseDefinition> onStart, Action<CourseDefinition> onQuickRace, Action onGhostToggle,
-            Action onBeaconToggle = null)
+            Action onBeaconToggle = null, Action onCupToggle = null, Action onAuthAction = null, Action onLeaderboard = null)
         {
             var screen = new GameObject("Time trial HUD", typeof(RectTransform), typeof(Canvas),
                 typeof(CanvasScaler), typeof(GraphicRaycaster));
@@ -94,38 +97,66 @@ namespace DriftCircuit
 
             RectTransform trackScreen = Fill("Track select", canvas, new Color(0.025f, 0.045f, 0.075f));
             menu = trackScreen.gameObject;
-            const float trackRowPitch = 82f;
-            const float trackRowHeight = 72f;
-            const float topTrackRow = 382f;
-            RectTransform trackCard = Panel("Circuits", trackScreen, center, Vector2.zero, new(900, 580), Ink);
+            const float trackRowPitch = 78f;
+            const float trackRowHeight = 68f;
+            const float topTrackRow = 384f;
+            RectTransform trackCard = Panel("Circuits", trackScreen, center, Vector2.zero, new(900, 620), Ink);
             Label("Game title", trackCard, topLeft, new(30, -16), new(420, 44), 34, Color.white).text = "DRIFT CIRCUIT";
             Label("Track select title", trackCard, topLeft, new(30, -64), new(405, 28), 18, Aqua).text = "TIME TRIALS";
             Label("Quick race title", trackCard, topLeft, new(465, -64), new(405, 28), 18, Gold).text = "QUICK RACES (VS RIVAL)";
             apiStatusLabel = Label("API status", trackCard, topLeft, new(465, -22), new(405, 28), 16, Aqua, TextAnchor.MiddleRight);
             int count = CourseDefinition.All.Length;
-            trackButtons = new Button[count * 2 + 2];
+            trackButtons = new Button[count * 2 + 5];
             trackRecords = new Text[count];
+            trackNames = new Text[count];
+            quickNames = new Text[count];
+            trialButtons = new Button[count];
+            quickButtons = new Button[count];
             for (int i = 0; i < count; i++)
             {
-                CourseDefinition definition = CourseDefinition.All[i];
+                int slot = i;
                 float y = topTrackRow - i * trackRowPitch;
-                Button button = Button(definition.Name, trackCard, new(30, y), new(405, trackRowHeight), () => onStart(definition), showLabel: false);
+                Button button = Button(CourseDefinition.All[i].Name, trackCard, new(30, y), new(405, trackRowHeight),
+                    () => onStart(currentCircuits[slot]), showLabel: false);
                 RectTransform row = (RectTransform)button.transform;
-                Label("Name", row, topLeft, new(16, -8), new(373, 28), 21, Ink).text = definition.Name;
-                trackRecords[i] = Label("Personal bests", row, topLeft, new(16, -40), new(373, 24), 15, Ink);
+                trackNames[i] = Label("Name", row, topLeft, new(16, -7), new(373, 28), 21, Ink);
+                trackNames[i].text = CourseDefinition.All[i].Name;
+                trackRecords[i] = Label("Personal bests", row, topLeft, new(16, -38), new(373, 24), 15, Ink);
+                trialButtons[i] = button;
                 trackButtons[i] = button;
 
-                trackButtons[count + i] = Button(QuickRaceName(definition), trackCard, new(465, y),
-                    new(405, trackRowHeight), () => onQuickRace(definition));
+                Button quick = Button(QuickRaceName(CourseDefinition.All[i]), trackCard, new(465, y),
+                    new(405, trackRowHeight), () => onQuickRace(currentCircuits[slot]));
+                quickNames[i] = quick.GetComponentInChildren<Text>();
+                quickButtons[i] = quick;
+                trackButtons[count + i] = quick;
             }
-            Button beaconToggle = Button("Route Beacon", trackCard, new(30, 64), new(405, 48), onBeaconToggle ?? (() => { }));
+            Button cupToggle = Button("Cup", trackCard, new(30, 108), new(265, 38), onCupToggle ?? (() => { }));
+            cupLabel = cupToggle.GetComponentInChildren<Text>();
+            trackButtons[^5] = cupToggle;
+            Button authButton = Button("Sign In", trackCard, new(317, 108), new(265, 38), onAuthAction ?? (() => { }));
+            authLabel = authButton.GetComponentInChildren<Text>();
+            trackButtons[^4] = authButton;
+            Button boardButton = Button("Leaderboard", trackCard, new(605, 108), new(265, 38), onLeaderboard ?? (() => { }));
+            trackButtons[^3] = boardButton;
+
+            Button beaconToggle = Button("Route Beacon", trackCard, new(30, 54), new(405, 44), onBeaconToggle ?? (() => { }));
             beaconLabel = beaconToggle.GetComponentInChildren<Text>();
             trackButtons[^2] = beaconToggle;
-            Button ghostToggle = Button("Ghost", trackCard, new(465, 64), new(405, 48), onGhostToggle);
+            Button ghostToggle = Button("Ghost", trackCard, new(465, 54), new(405, 44), onGhostToggle);
             ghostLabel = ghostToggle.GetComponentInChildren<Text>();
             trackButtons[^1] = ghostToggle;
-            Label("Selection controls", trackCard, bottomLeft, new(30, 20), new(840, 26), 16, Aqua).text =
+            Label("Selection controls", trackCard, bottomLeft, new(30, 18), new(840, 26), 16, Aqua).text =
                 "↑ / ↓ or D-pad   Select      Enter / A   Confirm";
+
+            RectTransform boardShade = Fill("Leaderboard modal", trackScreen, new Color(0, 0, 0, 0.72f));
+            boardShade.GetComponent<Image>().raycastTarget = true;
+            boardModal = boardShade.gameObject;
+            RectTransform boardCard = Panel("Leaderboard card", boardShade, center, Vector2.zero, new(560, 340), Ink);
+            Label("Board title", boardCard, topLeft, new(28, -18), new(504, 40), 28, Aqua).text = "LEADERBOARD";
+            boardBody = Label("Board body", boardCard, topLeft, new(28, -68), new(504, 195), 18, Color.white, TextAnchor.UpperLeft);
+            Button("Close", boardCard, new(195, 22), new(170, 44), () => boardModal.SetActive(false));
+            boardModal.SetActive(false);
 
             var eventObject = new GameObject("Time trial input", typeof(EventSystem), typeof(InputSystemUIInputModule));
             eventObject.transform.SetParent(parent, false);
@@ -137,19 +168,36 @@ namespace DriftCircuit
             module.move = null;
         }
 
-        public void ShowTracks(TrialRecordStore store, bool ghostEnabled, bool beaconEnabled = false, string apiStatus = "Offline (local records)")
+        public void ShowTracks(TrialRecordStore store, bool ghostEnabled, bool beaconEnabled = false,
+            string apiStatus = "Offline (local records)", CourseDefinition.Cup cup = CourseDefinition.Cup.City,
+            bool signedIn = false, bool signInPending = false)
         {
             raceHud.SetActive(false);
             menu.SetActive(true);
-            for (int i = 0; i < trackRecords.Length; i++)
+            boardModal.SetActive(false);
+            currentCircuits = cup == CourseDefinition.Cup.Skyline ? CourseDefinition.Skyline : CourseDefinition.All;
+            for (int i = 0; i < currentCircuits.Length; i++)
             {
-                TrialRecord record = store.Load(CourseDefinition.All[i]);
+                CourseDefinition def = currentCircuits[i];
+                trialButtons[i].gameObject.name = def.Name;
+                trackNames[i].text = def.Name;
+                quickButtons[i].gameObject.name = QuickRaceName(def);
+                quickNames[i].text = QuickRaceName(def);
+                TrialRecord record = store.Load(def);
                 trackRecords[i].text = $"Best lap  {FormatBest(record?.BestLap)}     Best total  {FormatBest(record?.BestTotal)}";
             }
+            cupLabel.text = cup == CourseDefinition.Cup.Skyline ? "Cup: Skyline Cup" : "Cup: City Cup";
+            authLabel.text = signedIn ? "Sign Out" : signInPending ? "Cancel Sign-In" : "Sign In";
             ShowGhostPreference(ghostEnabled);
             ShowBeaconPreference(beaconEnabled);
             apiStatusLabel.text = apiStatus;
             SetButtons(trackButtons);
+        }
+
+        public void ShowLeaderboard(string bodyText)
+        {
+            boardBody.text = bodyText;
+            boardModal.SetActive(true);
         }
 
         public void ShowGhostPreference(bool enabled) => ghostLabel.text = enabled ? "Ghost   ON" : "Ghost   OFF";
@@ -162,7 +210,7 @@ namespace DriftCircuit
             menu.SetActive(false);
             raceHud.SetActive(true);
             quickRace = isQuickRace;
-            itemPanel.SetActive(isQuickRace && definition != CourseDefinition.Rustrail);
+            itemPanel.SetActive(isQuickRace && definition != CourseDefinition.Rustrail && definition != CourseDefinition.Foundry);
             circuit.fontSize = quickRace ? 14 : 18;
             circuit.text = (quickRace ? QuickRaceName(definition) : definition.Name).ToUpperInvariant();
             previousPhase = (TrialPhase)(-1);

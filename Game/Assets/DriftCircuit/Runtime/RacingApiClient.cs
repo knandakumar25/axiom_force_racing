@@ -15,9 +15,14 @@ namespace DriftCircuit
     internal interface IRacingSaveStore
     {
         bool IsSignedIn { get; }
+        bool SignInPending { get; }
         string Username { get; }
         string StatusText { get; }
         Task<bool> TryRestoreSessionAsync();
+        Task<string> StartBrowserSignInAsync();
+        Task<bool> PollBrowserSignInAsync();
+        Task CancelBrowserSignInAsync();
+        void SignOut();
         Task<bool> SyncRecordAsync(CourseDefinition circuit, TrialRecord record);
         Task<bool> SyncSettingsAsync(bool showGhost, bool showBeacon);
         Task<string> FetchLeaderboardAsync();
@@ -30,16 +35,44 @@ namespace DriftCircuit
         private readonly List<(string Username, int Score)> board = new();
 
         public bool IsSignedIn { get; private set; }
+        public bool SignInPending { get; private set; }
         public string Username { get; private set; } = "Offline";
-        public string StatusText => IsSignedIn ? $"Signed in: {Username}" : "Offline (local records)";
+        public string StatusText => IsSignedIn ? $"Signed in: {Username}" : SignInPending ? "Waiting for browser sign-in..." : "Offline (local records)";
         internal bool LastGhostSetting { get; private set; }
         internal bool LastBeaconSetting { get; private set; }
         internal IReadOnlyDictionary<string, TrialRecord> SyncedRecords => syncedRecords;
 
         internal void SignInForTests(string username)
         {
+            SignInPending = false;
             IsSignedIn = true;
             Username = string.IsNullOrWhiteSpace(username) ? "TestRacer" : username;
+        }
+
+        public Task<string> StartBrowserSignInAsync()
+        {
+            SignInPending = true;
+            return Task.FromResult("http://localhost:5173/en/game-auth");
+        }
+
+        public Task<bool> PollBrowserSignInAsync()
+        {
+            if (!SignInPending) return Task.FromResult(IsSignedIn);
+            SignInForTests("BrowserRacer");
+            return Task.FromResult(true);
+        }
+
+        public Task CancelBrowserSignInAsync()
+        {
+            SignInPending = false;
+            return Task.CompletedTask;
+        }
+
+        public void SignOut()
+        {
+            SignInPending = false;
+            IsSignedIn = false;
+            Username = "Offline";
         }
 
         internal void SeedLeaderboard(string username, int score) => board.Add((username, score));
@@ -113,6 +146,23 @@ namespace DriftCircuit
         }
 
         [Serializable]
+        private sealed class BrowserStartResponse
+        {
+            public string session_id;
+            public string secret;
+            public string auth_url;
+        }
+
+        [Serializable]
+        private sealed class BrowserPollResponse
+        {
+            public string status;
+            public string access;
+            public string refresh;
+            public MeResponse user;
+        }
+
+        [Serializable]
         private sealed class SettingsPayload
         {
             public bool showGhost;
@@ -124,10 +174,13 @@ namespace DriftCircuit
         private readonly string tokenPath;
         private readonly SemaphoreSlim refreshLock = new(1, 1);
         private TokenSession session;
+        private string pendingSessionId;
+        private string pendingSecret;
         private int activeSlotId = -1;
         private int activeRevision = 0;
 
         public bool IsSignedIn => session != null && !string.IsNullOrEmpty(session.access);
+        public bool SignInPending => !string.IsNullOrEmpty(pendingSessionId);
         public string Username => IsSignedIn ? (session.username ?? "Racer") : "Offline";
         public string StatusText { get; private set; } = "Offline (local records)";
 
@@ -178,6 +231,97 @@ namespace DriftCircuit
                 StatusText = "API offline (local records)";
                 return false;
             }
+        }
+
+        public async Task<string> StartBrowserSignInAsync()
+        {
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/api/auth/browser-start/")
+                {
+                    Content = new StringContent("{}", Encoding.UTF8, "application/json")
+                };
+                using HttpResponseMessage res = await http.SendAsync(req);
+                if (!res.IsSuccessStatusCode)
+                {
+                    StatusText = "Sign-in unavailable";
+                    return null;
+                }
+                BrowserStartResponse started = JsonUtility.FromJson<BrowserStartResponse>(await res.Content.ReadAsStringAsync());
+                if (started == null || string.IsNullOrEmpty(started.session_id) || string.IsNullOrEmpty(started.auth_url))
+                    return null;
+                pendingSessionId = started.session_id;
+                pendingSecret = started.secret;
+                StatusText = "Waiting for browser sign-in...";
+                return started.auth_url;
+            }
+            catch
+            {
+                StatusText = "API offline (local records)";
+                return null;
+            }
+        }
+
+        public async Task<bool> PollBrowserSignInAsync()
+        {
+            if (string.IsNullOrEmpty(pendingSessionId) || string.IsNullOrEmpty(pendingSecret))
+                return IsSignedIn;
+            try
+            {
+                string body = $"{{\"session_id\":\"{pendingSessionId}\",\"secret\":\"{pendingSecret}\"}}";
+                using var req = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/api/auth/browser-poll/")
+                {
+                    Content = new StringContent(body, Encoding.UTF8, "application/json")
+                };
+                using HttpResponseMessage res = await http.SendAsync(req);
+                if (!res.IsSuccessStatusCode)
+                    return false;
+                BrowserPollResponse polled = JsonUtility.FromJson<BrowserPollResponse>(await res.Content.ReadAsStringAsync());
+                if (polled == null || string.IsNullOrEmpty(polled.access))
+                    return false;
+                session = new TokenSession
+                {
+                    access = polled.access,
+                    refresh = polled.refresh,
+                    username = polled.user?.username ?? "Racer"
+                };
+                pendingSessionId = pendingSecret = null;
+                File.WriteAllText(tokenPath, JsonUtility.ToJson(session));
+                StatusText = $"API: {Username}";
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public async Task CancelBrowserSignInAsync()
+        {
+            if (string.IsNullOrEmpty(pendingSessionId))
+                return;
+            string sid = pendingSessionId;
+            pendingSessionId = pendingSecret = null;
+            StatusText = IsSignedIn ? $"API: {Username}" : "Offline (local records)";
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/api/auth/browser-cancel/")
+                {
+                    Content = new StringContent($"{{\"session_id\":\"{sid}\"}}", Encoding.UTF8, "application/json")
+                };
+                await http.SendAsync(req);
+            }
+            catch { }
+        }
+
+        public void SignOut()
+        {
+            pendingSessionId = pendingSecret = null;
+            session = null;
+            activeSlotId = -1;
+            activeRevision = 0;
+            if (File.Exists(tokenPath)) File.Delete(tokenPath);
+            StatusText = "Offline (local records)";
         }
 
         public async Task<bool> SyncRecordAsync(CourseDefinition circuit, TrialRecord record)

@@ -35,7 +35,26 @@ namespace DriftCircuit
             new("ITEM GATE", new(-65, 0, -5), Vector3.back, 6.4f)
         };
 
-        private static readonly RaceItem[] RandomOnly = { RaceItem.None, RaceItem.None, RaceItem.None };
+        private static readonly Checkpoint[] CyberGraveGates =
+        {
+            new("ITEM GATE", new(24, 0, -62), Vector3.right, 6.6f),
+            new("ITEM GATE", new(-10, 0, 54), Vector3.left, 6.8f)
+        };
+
+        private static readonly Checkpoint[] SpireHullGates =
+        {
+            new("ITEM GATE", new(22, 0.3f, -60), Vector3.right, 6.8f),
+            new("ITEM GATE", new(-10, 4.6f, 58), Vector3.left, 7.0f)
+        };
+
+        private static readonly Checkpoint[] ApexDescentGates =
+        {
+            new("ITEM GATE", new(22, 0.5f, -64), Vector3.right, 7.0f),
+            new("ITEM GATE", new(-10, 3.4f, 60), Vector3.left, 7.2f)
+        };
+
+        private static readonly RaceItem[] RandomThree = { RaceItem.None, RaceItem.None, RaceItem.None };
+        private static readonly RaceItem[] RandomTwo = { RaceItem.None, RaceItem.None };
 
         private readonly Checkpoint[] gates;
         private readonly RaceItem[] items;
@@ -57,14 +76,21 @@ namespace DriftCircuit
         {
             if (circuit == CourseDefinition.Tokyo) return TokyoGates;
             if (circuit == CourseDefinition.Viaduct) return ViaductGates;
-            if (circuit == CourseDefinition.Rustrail) return System.Array.Empty<Checkpoint>();
+            if (circuit == CourseDefinition.CyberGrave) return CyberGraveGates;
+            if (circuit == CourseDefinition.SpireHull) return SpireHullGates;
+            if (circuit == CourseDefinition.ApexDescent) return ApexDescentGates;
+            if (circuit == CourseDefinition.Rustrail || circuit == CourseDefinition.Foundry)
+                return System.Array.Empty<Checkpoint>();
             return Gates;
         }
 
         internal static RaceItem[] ItemsFor(CourseDefinition circuit)
         {
-            if (circuit == CourseDefinition.Tokyo || circuit == CourseDefinition.Viaduct) return RandomOnly;
-            if (circuit == CourseDefinition.Rustrail) return System.Array.Empty<RaceItem>();
+            if (circuit == CourseDefinition.Tokyo || circuit == CourseDefinition.Viaduct) return RandomThree;
+            if (circuit == CourseDefinition.CyberGrave || circuit == CourseDefinition.SpireHull ||
+                circuit == CourseDefinition.ApexDescent) return RandomTwo;
+            if (circuit == CourseDefinition.Rustrail || circuit == CourseDefinition.Foundry)
+                return System.Array.Empty<RaceItem>();
             return Items;
         }
 

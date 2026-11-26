@@ -66,7 +66,7 @@ namespace DriftCircuit
                 };
                 Cube(landmark.Name, landmark.Position, landmark.Scale, Quaternion.Euler(0, landmark.Yaw, 0), material, landmark.Solid);
             }
-            if (definition == CourseDefinition.Rustrail)
+            if (definition == CourseDefinition.Rustrail || definition == CourseDefinition.Foundry)
                 crossing = new RailCrossing(this, dark, rail);
         }
 
@@ -176,7 +176,10 @@ namespace DriftCircuit
                 Station station = stations[i];
                 Vector3 before = stations[closed ? (i + count - 1) % count : Mathf.Max(0, i - 1)].Center;
                 Vector3 after = stations[closed ? (i + 1) % count : Mathf.Min(count - 1, i + 1)].Center;
-                Vector3 right = Vector3.Cross(Vector3.up, (after - before).normalized);
+                Vector3 tangent = (after - before).normalized;
+                Vector3 right = Vector3.Cross(Vector3.up, tangent);
+                if (Mathf.Abs(station.Bank) > 0.01f)
+                    right = Quaternion.AngleAxis(station.Bank, tangent) * right;
                 Vector3 center = station.Center + Vector3.up * height;
                 vertices[i * 2] = center - right * station.Width;
                 vertices[i * 2 + 1] = center + right * station.Width;
@@ -215,10 +218,9 @@ namespace DriftCircuit
             Cube("Edge marker", middle + Vector3.up * 0.78f, new(0.12f, 0.06f, length * 0.78f), rotation, marking);
         }
 
-        /// <summary>Checks a sampled edge against the width of the adjacent road.</summary>
+        /// <summary>Checks a sampled edge against the width and elevation of the adjacent road.</summary>
         private static bool NearRoad(Vector3 point, List<Station> stations, bool closed)
         {
-            point.y = 0;
             int segments = closed ? stations.Count : stations.Count - 1;
             for (int i = 0; i < segments; i++)
             {
@@ -227,7 +229,8 @@ namespace DriftCircuit
                 float t = Mathf.Clamp01(Vector3.Dot(point - a.Center, segment) / segment.sqrMagnitude);
                 Station nearest = Station.Lerp(a, b, t);
                 float clearance = nearest.Width + 1.1f;
-                if ((point - nearest.Center).sqrMagnitude < clearance * clearance)
+                Vector2 flatDelta = new(point.x - nearest.Center.x, point.z - nearest.Center.z);
+                if (Mathf.Abs(point.y - nearest.Center.y) <= 2.5f && flatDelta.sqrMagnitude < clearance * clearance)
                     return true;
             }
             return false;

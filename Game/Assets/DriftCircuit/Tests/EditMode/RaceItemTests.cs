@@ -478,5 +478,34 @@ public sealed class RaceItemTests
 
         store.SeedLeaderboard("CyberDriver", 86860);
         Assert.That(store.FetchLeaderboardAsync().Result, Does.Contain("CyberDriver"));
+
+        Assert.That(store.StartBrowserSignInAsync().Result, Does.Contain("game-auth"));
+        Assert.That(store.SignInPending, Is.True);
+        Assert.That(store.PollBrowserSignInAsync().Result, Is.True);
+        Assert.That(store.IsSignedIn, Is.True);
+        store.SignOut();
+        Assert.That(store.IsSignedIn, Is.False);
+    }
+
+    /// <summary>Skyline Cup circuits have valid banking interpolation, driving lines, respawns, and pickup gates.</summary>
+    [Test]
+    public void SkylineCupCoursesHaveValidStationsBankingAndPickups()
+    {
+        Assert.That(CourseDefinition.Skyline.Length, Is.EqualTo(4));
+        Assert.That(CourseDefinition.AllCircuits.Length, Is.EqualTo(8));
+        Station lerped = Station.Lerp(new Station(0, 0, 6f, 0f), new Station(10, 0, 8f, 12f), 0.5f);
+        Assert.That(lerped.Bank, Is.EqualTo(6f).Within(0.001f));
+
+        foreach (CourseDefinition circuit in CourseDefinition.Skyline)
+        {
+            Assert.That(circuit.CircuitCup, Is.EqualTo(CourseDefinition.Cup.Skyline));
+            Assert.That(TrialCourse.DrivingLine(circuit, false).Length, Is.GreaterThan(10));
+            Assert.That(TrialCourse.DrivingLine(circuit, true).Length, Is.GreaterThan(10));
+            Assert.That(circuit.Respawn(-1).Position, Is.EqualTo(circuit.Start));
+        }
+        Assert.That(RelayBoostPickups.GatesFor(CourseDefinition.Foundry), Is.Empty);
+        Assert.That(RelayBoostPickups.GatesFor(CourseDefinition.CyberGrave).Length, Is.EqualTo(2));
+        Assert.That(RelayBoostPickups.GatesFor(CourseDefinition.SpireHull).Length, Is.EqualTo(2));
+        Assert.That(RelayBoostPickups.GatesFor(CourseDefinition.ApexDescent).Length, Is.EqualTo(2));
     }
 }

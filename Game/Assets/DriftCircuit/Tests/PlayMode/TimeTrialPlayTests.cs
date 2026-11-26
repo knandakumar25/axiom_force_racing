@@ -949,18 +949,47 @@ public sealed class TimeTrialPlayTests
         {
             PlayerPrefs.SetInt(TimeTrial.BeaconPreference, 0);
             yield return LoadScene(TimeTrial.MenuScenePath);
-            Keys(Key.UpArrow); yield return null; yield return null;
-            Keys(Key.UpArrow); yield return null; yield return null;
-            Keys(Key.Enter); yield return null; yield return null;
+            Keys(Key.UpArrow); yield return null; yield return null; Keys(); yield return null;
+            Keys(Key.UpArrow); yield return null; yield return null; Keys(); yield return null;
+            Keys(Key.Enter); yield return null; yield return null; Keys(); yield return null;
             Assert.That(PlayerPrefs.GetInt(TimeTrial.BeaconPreference), Is.EqualTo(1));
             Assert.That(api.LastBeaconSetting, Is.True);
-            Keys();
         }
         finally
         {
             if (originalBeacon < 0) PlayerPrefs.DeleteKey(TimeTrial.BeaconPreference);
             else PlayerPrefs.SetInt(TimeTrial.BeaconPreference, originalBeacon);
             PlayerPrefs.Save();
+        }
+    }
+
+    /// <summary>Verifies Skyline Cup switching, all four Skyline circuits, and Leaderboard/Sign-In UI controls.</summary>
+    [UnityTest]
+    public IEnumerator SkylineCupTracksAndBrowserSignInUi()
+    {
+        var api = new InMemoryRacingSaveStore();
+        api.SeedLeaderboard("SkylineChamp", 75000);
+        TimeTrial.SaveStoreOverride = api;
+
+        var mouse = InputSystem.AddDevice<Mouse>();
+        try
+        {
+            foreach (CourseDefinition circuit in CourseDefinition.Skyline)
+            {
+                yield return LoadScene(TimeTrial.MenuScenePath);
+                yield return ClickMenuButton(mouse, Label("Label", "Cup"));
+                Assert.That(Label("Label", "Cup").text, Is.EqualTo("Cup: Skyline Cup"));
+                yield return ClickMenuButton(mouse, Label("Name", circuit.Name));
+                Assert.That(trial.Circuit, Is.SameAs(circuit));
+            }
+
+            yield return LoadScene(TimeTrial.MenuScenePath);
+            yield return ClickMenuButton(mouse, Label("Label", "Leaderboard"));
+            Assert.That(Label("Board body").text, Does.Contain("SkylineChamp"));
+        }
+        finally
+        {
+            InputSystem.RemoveDevice(mouse);
         }
     }
 
@@ -1398,7 +1427,7 @@ public sealed class TimeTrialPlayTests
         string[] names = { "Little Tokyo–Skyport", "Concrete Wards Viaduct", "Stratos Docks", "Rustrail Junction",
             TrialHud.QuickRaceName(CourseDefinition.Tokyo), TrialHud.QuickRaceName(CourseDefinition.Viaduct),
             TrialHud.QuickRaceName(CourseDefinition.Docks), TrialHud.QuickRaceName(CourseDefinition.Rustrail),
-            "Route Beacon", "Ghost" };
+            "Cup", "Sign In", "Leaderboard", "Route Beacon", "Ghost" };
         for (int device = 0; device < 2; device++)
         {
             yield return LoadScene(TimeTrial.MenuScenePath);

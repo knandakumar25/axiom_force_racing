@@ -29,6 +29,9 @@ namespace DriftCircuit
         private double? checkpointDelta;
         private bool showGhost;
         private bool showBeacon;
+        private CourseDefinition.Cup activeCup = CourseDefinition.Cup.City;
+        private float authPollTimer;
+        private bool authPollBusy;
         private TrialInput input;
         private TrialCourse course;
         private TrialKart kart;
@@ -66,7 +69,8 @@ namespace DriftCircuit
             showGhost = PlayerPrefs.GetInt(GhostPreference, 1) != 0;
             showBeacon = PlayerPrefs.GetInt(BeaconPreference, 0) != 0;
             hud = new TrialHud(transform, TogglePause, Retry, OpenTrackSelect, StartCircuit,
-                definition => StartCircuit(definition, quickRace: true), ToggleGhost, ToggleBeacon);
+                definition => StartCircuit(definition, quickRace: true), ToggleGhost, ToggleBeacon,
+                ToggleCup, ToggleAuth, ShowLeaderboard);
             if (startAtTrackSelect)
                 OpenTrackSelect();
             else
@@ -91,7 +95,7 @@ namespace DriftCircuit
             {
                 TrialKart rivalKart = BuildKart("Rival kart", 0xf05a27, out Material tailLights);
                 Rival = new TrialRival(definition, rivalKart, tailLights);
-                if (definition != CourseDefinition.Rustrail)
+                if (definition != CourseDefinition.Rustrail && definition != CourseDefinition.Foundry)
                 {
                     bool randomPool = definition != CourseDefinition.Docks;
                     playerPool = randomPool ? new ItemPool(1337) : null;
@@ -136,7 +140,43 @@ namespace DriftCircuit
             comparison = null;
             poses.Clear();
             checkpointTimes.Clear();
-            hud.ShowTracks(records, showGhost, showBeacon, saveStore.StatusText);
+            hud.ShowTracks(records, showGhost, showBeacon, saveStore.StatusText, activeCup,
+                saveStore.IsSignedIn, saveStore.SignInPending);
+        }
+
+        private void ToggleCup()
+        {
+            activeCup = activeCup == CourseDefinition.Cup.City ? CourseDefinition.Cup.Skyline : CourseDefinition.Cup.City;
+            hud.ShowTracks(records, showGhost, showBeacon, saveStore.StatusText, activeCup,
+                saveStore.IsSignedIn, saveStore.SignInPending);
+        }
+
+        private async void ToggleAuth()
+        {
+            if (saveStore.IsSignedIn)
+            {
+                saveStore.SignOut();
+            }
+            else if (saveStore.SignInPending)
+            {
+                await saveStore.CancelBrowserSignInAsync();
+            }
+            else
+            {
+                string authUrl = await saveStore.StartBrowserSignInAsync();
+                if (!string.IsNullOrEmpty(authUrl))
+                    Application.OpenURL(authUrl);
+            }
+            if (Rules == null)
+                hud.ShowTracks(records, showGhost, showBeacon, saveStore.StatusText, activeCup,
+                    saveStore.IsSignedIn, saveStore.SignInPending);
+        }
+
+        private async void ShowLeaderboard()
+        {
+            string board = await saveStore.FetchLeaderboardAsync();
+            if (Rules == null)
+                hud.ShowLeaderboard(board);
         }
 
         private void ToggleGhost()
@@ -214,10 +254,29 @@ namespace DriftCircuit
             }
 
             if (Rules == null)
+            {
+                if (saveStore.SignInPending && !authPollBusy && (authPollTimer += Time.unscaledDeltaTime) >= 2f)
+                {
+                    authPollTimer = 0f;
+                    _ = PollSignInOnceAsync();
+                }
                 return;
+            }
             if (Rules.Phase == TrialPhase.Racing)
                 shownGo = Mathf.Max(0f, shownGo - Time.deltaTime);
             RefreshHud();
+        }
+
+        private async System.Threading.Tasks.Task PollSignInOnceAsync()
+        {
+            authPollBusy = true;
+            try
+            {
+                if (await saveStore.PollBrowserSignInAsync() && Rules == null)
+                    hud.ShowTracks(records, showGhost, showBeacon, saveStore.StatusText, activeCup,
+                        saveStore.IsSignedIn, saveStore.SignInPending);
+            }
+            finally { authPollBusy = false; }
         }
 
         private void RefreshHud() => hud.Refresh(Rules, kart, shownGo > 0f, checkpointDelta, result, RaceResult,

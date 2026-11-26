@@ -3,21 +3,22 @@ using UnityEngine;
 
 namespace DriftCircuit
 {
-    /// <summary>Pairs a road center with the half width at that point.</summary>
+    /// <summary>Pairs a road center with the half width and banking angle at that point.</summary>
     internal readonly struct Station
     {
         public readonly Vector3 Center;
         public readonly float Width;
+        public readonly float Bank;
 
         /// <summary>Defines a station in scene space.</summary>
-        public Station(Vector3 center, float width) { Center = center; Width = width; }
+        public Station(Vector3 center, float width, float bank = 0f) { Center = center; Width = width; Bank = bank; }
 
         /// <summary>Defines a station on the flat course.</summary>
-        public Station(float x, float z, float width) : this(new Vector3(x, 0, z), width) { }
+        public Station(float x, float z, float width, float bank = 0f) : this(new Vector3(x, 0, z), width, bank) { }
 
-        /// <summary>Interpolates both the width and the center along a road segment.</summary>
+        /// <summary>Interpolates the width, banking, and center along a road segment.</summary>
         public static Station Lerp(Station from, Station to, float t) =>
-            new(Vector3.Lerp(from.Center, to.Center, t), Mathf.Lerp(from.Width, to.Width, t));
+            new(Vector3.Lerp(from.Center, to.Center, t), Mathf.Lerp(from.Width, to.Width, t), Mathf.Lerp(from.Bank, to.Bank, t));
     }
 
 
@@ -134,7 +135,117 @@ namespace DriftCircuit
             }, RustrailMain, RustrailCrossing, 3, "Switchback", "Rail crossing",
             new Landmark[] { new("Rail yard foundation", new(0, -3, 0), new(224, 1, 189), Surface.Dark) });
 
+        private static readonly Station[] FoundryMain =
+        {
+            new(0, -68, 7.2f), new(56, -68, 7.2f, 8f), new(82, -44, 7.2f, 12f),
+            new(82, 24, 7.2f, 12f), new(56, 60, 7.4f, 10f), new(-56, 60, 7.4f, 6f),
+            new(-84, 42, 7f), new(-84, 28, 7f), new(-84, 20, 7f), new(-84, 12, 7f), new(-62, 6, 6.2f),
+            new(-52, -12, 6.2f), new(-64, -30, 6.2f), new(-84, -38, 7f), new(-84, -46, 7f),
+            new(-84, -56, 7f), new(-66, -68, 7.2f), new(-36, -68, 7.2f)
+        };
+
+        private static readonly Station[] FoundryBypass =
+        {
+            new(-84, 20, 3.8f), new(-90, 7, 3.8f), new(-90, -29, 3.8f),
+            new(-84, -46, 3.8f), new(-84, -56, 7f)
+        };
+
+        private static readonly Station[] CyberGraveMain =
+        {
+            new(0, -62, 6.8f), new(54, -62, 6.8f), new(76, -38, 6.5f),
+            new(76, 18, 6.5f), new(52, 54, 7f), new(-48, 54, 7f),
+            new(-68, 36, 6.6f), new(-68, 24, 6.6f), new(-68, 16, 6.6f), new(-68, 8, 6.6f), new(-48, 2, 6f),
+            new(-48, -18, 6f), new(-68, -32, 6.6f), new(-68, -46, 6.6f), new(-68, -54, 6.6f),
+            new(-46, -62, 6.8f), new(-22, -62, 6.8f)
+        };
+
+        private static readonly Station[] CyberGraveRamp =
+        {
+            new(-68, 16, 4.2f), new(new Vector3(-74, 1.8f, 2), 4.2f), new(new Vector3(-74, 3.0f, -10), 4.2f),
+            new(new Vector3(-74, 1.4f, -24), 4.2f), new(-68, -46, 4.2f), new(-68, -54, 6.6f)
+        };
+
+        private static readonly Station[] SpireHullMain =
+        {
+            new(0, -60, 7f), new(new Vector3(52, 0.8f, -60), 7f), new(new Vector3(76, 2.2f, -32), 7f),
+            new(new Vector3(76, 3.8f, 24), 7f), new(new Vector3(48, 5.0f, 58), 7.2f),
+            new(new Vector3(-44, 4.2f, 58), 7.2f), new(new Vector3(-74, 3.5f, 44), 7f),
+            new(new Vector3(-74, 3.0f, 34), 7f), new(new Vector3(-74, 2.5f, 24), 7f),
+            new(new Vector3(-74, 1.5f, 4), 7f), new(-74, -28, 7f),
+            new(-74, -42, 7f), new(-74, -50, 7f), new(-48, -60, 7f), new(-24, -60, 7f)
+        };
+
+        private static readonly Station[] SpireHullTransfer =
+        {
+            new(new Vector3(-74, 3.0f, 34), 3.8f), new(new Vector3(-56, 1.6f, 14), 3.8f),
+            new(new Vector3(-56, 0.4f, -14), 3.8f), new(-74, -42, 3.8f), new(-74, -50, 7f)
+        };
+
+        private static readonly Station[] ApexBastionMain =
+        {
+            new(0, -64, 7.2f), new(new Vector3(54, 1.5f, -64), 7.2f), new(new Vector3(78, 3.5f, -34), 7.2f),
+            new(new Vector3(78, 4.8f, 22), 7.4f), new(new Vector3(48, 4.2f, 60), 7.4f),
+            new(new Vector3(-46, 2.8f, 60), 7.4f), new(new Vector3(-76, 2.0f, 44), 7.4f),
+            new(new Vector3(-76, 1.6f, 34), 7.4f), new(new Vector3(-76, 1.2f, 24), 7.4f),
+            new(new Vector3(-76, 0.4f, -10), 7.4f), new(-76, -30, 7.4f), new(-76, -44, 7.4f),
+            new(-76, -54, 7.4f), new(-50, -64, 7.2f), new(-24, -64, 7.2f)
+        };
+
+        private static readonly Station[] ApexBastionInner =
+        {
+            new(new Vector3(-76, 1.6f, 34), 4.4f), new(new Vector3(-58, 0.9f, 10), 4.4f),
+            new(new Vector3(-58, 0.3f, -18), 4.4f), new(-76, -44, 4.4f), new(-76, -54, 7.4f)
+        };
+
+        public static readonly CourseDefinition Foundry = new(
+            "foundry-forge", "Foundry Forge", 1, new(4, 0.58f, -68), Vector3.right,
+            new Checkpoint[]
+            {
+                new("Smelter Turn", new(82, 0, -10), Vector3.forward, 7f),
+                new("Upper Catwalk", new(0, 0, 60), Vector3.left, 7.2f),
+                new("Gate Approach", new(-84, 0, 32), Vector3.back, 6.8f),
+                new("Finish", new(0, 0, -68), Vector3.right, 7f)
+            }, FoundryMain, FoundryBypass, 3, "Factory loop", "Timed bypass",
+            new Landmark[] { new("Foundry floor", new(0, -3, 0), new(224, 1, 189), Surface.Dark) }, Cup.Skyline);
+
+        public static readonly CourseDefinition CyberGrave = new(
+            "cyber-grave-circuit", "Cyber Grave Circuit", 1, new(4, 0.58f, -62), Vector3.right,
+            new Checkpoint[]
+            {
+                new("Scrap Yard", new(76, 0, -10), Vector3.forward, 6.4f),
+                new("North Ridge", new(0, 0, 54), Vector3.left, 6.8f),
+                new("Ramp Approach", new(-68, 0, 26), Vector3.back, 6.4f),
+                new("Finish", new(0, 0, -62), Vector3.right, 6.6f)
+            }, CyberGraveMain, CyberGraveRamp, 4, "Salvage hairpin", "Jump ramp",
+            new Landmark[] { new("Salvage yard", new(0, -3, 0), new(210, 1, 175), Surface.Dark) }, Cup.Skyline);
+
+        public static readonly CourseDefinition SpireHull = new(
+            "spire-outer-hull", "Spire Outer Hull", 1, new(4, 0.58f, -60), Vector3.right,
+            new Checkpoint[]
+            {
+                new("East Climb", new(76, 3.0f, 0), Vector3.forward, 6.8f),
+                new("Summit", new(0, 4.6f, 58), Vector3.left, 7f),
+                new("Transfer Entry", new(-74, 3.5f, 44), Vector3.back, 6.8f),
+                new("Finish", new(0, 0, -60), Vector3.right, 6.8f)
+            }, SpireHullMain, SpireHullTransfer, 3, "Spiral hull", "Lower transfer",
+            new Landmark[] { new("Spire base", new(0, -3, 0), new(210, 1, 175), Surface.Dark) }, Cup.Skyline);
+
+        public static readonly CourseDefinition ApexDescent = new(
+            "apex-bastion-descent", "Apex Bastion Descent", 1, new(4, 0.58f, -64), Vector3.right,
+            new Checkpoint[]
+            {
+                new("Bastion Climb", new(78, 4.2f, -4), Vector3.forward, 7f),
+                new("High Crest", new(0, 3.5f, 60), Vector3.left, 7.2f),
+                new("Descent Split", new(-76, 2.2f, 46), Vector3.back, 7.2f),
+                new("Finish", new(0, 0, -64), Vector3.right, 7f)
+            }, ApexBastionMain, ApexBastionInner, 3, "High line", "Inner descent",
+            new Landmark[] { new("Bastion plateau", new(0, -3, 0), new(220, 1, 185), Surface.Dark) }, Cup.Skyline);
+
+        internal enum Cup { City, Skyline }
+
         public static readonly CourseDefinition[] All = { Tokyo, Viaduct, Docks, Rustrail };
+        public static readonly CourseDefinition[] Skyline = { Foundry, CyberGrave, SpireHull, ApexDescent };
+        public static readonly CourseDefinition[] AllCircuits = { Tokyo, Viaduct, Docks, Rustrail, Foundry, CyberGrave, SpireHull, ApexDescent };
 
         public readonly string Id, Name, MainName, ShortcutName;
         public readonly int Revision, ShortcutRejoin;
@@ -142,10 +253,11 @@ namespace DriftCircuit
         public readonly Checkpoint[] Gates;
         public readonly Station[] Main, Shortcut;
         public readonly Landmark[] Landmarks;
+        public readonly Cup CircuitCup;
 
         private CourseDefinition(string id, string name, int revision, Vector3 start, Vector3 startForward,
             Checkpoint[] gates, Station[] main, Station[] shortcut, int shortcutRejoin,
-            string mainName, string shortcutName, Landmark[] landmarks)
+            string mainName, string shortcutName, Landmark[] landmarks, Cup cup = Cup.City)
         {
             Id = id;
             Name = name;
@@ -159,6 +271,7 @@ namespace DriftCircuit
             MainName = mainName;
             ShortcutName = shortcutName;
             Landmarks = landmarks;
+            CircuitCup = cup;
         }
 
         public (Vector3 Position, Vector3 Forward) Respawn(int lastGate)
