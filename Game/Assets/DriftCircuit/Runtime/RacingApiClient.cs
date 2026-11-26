@@ -336,8 +336,9 @@ namespace DriftCircuit
                 string token = Guid.NewGuid().ToString("N");
                 string recordJson = JsonUtility.ToJson(record);
                 int bestMs = record.BestTotal > 0d ? Mathf.RoundToInt((float)(record.BestTotal * 1000d)) : 0;
+                string characterId = string.IsNullOrEmpty(record.DriverId) ? "drift_circuit" : record.DriverId;
                 string body = $"{{\"expectRevision\":{activeRevision},\"token\":\"{token}\"," +
-                    $"\"slot\":{{\"score\":{bestMs},\"level\":1,\"character\":\"drift_circuit\"}}," +
+                    $"\"slot\":{{\"score\":{bestMs},\"level\":1,\"character\":\"{characterId}\"}}," +
                     $"\"docs\":[{{\"key\":\"{docKey}\",\"schemaVersion\":1,\"value\":{recordJson}}}]}}";
                 using HttpResponseMessage res = await SendAuthorizedAsync(HttpMethod.Post, $"/api/game/slots/{activeSlotId}/commit/", body);
                 if (!res.IsSuccessStatusCode)

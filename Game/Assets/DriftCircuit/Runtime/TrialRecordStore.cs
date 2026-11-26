@@ -28,6 +28,8 @@ namespace DriftCircuit
         public string Circuit;
         public int Revision;
         public double BestLap, BestTotal;
+        public string DriverId;
+        public string DriverName;
         public double[] Checkpoints;
         public GhostPose[] Poses;
     }
@@ -69,7 +71,7 @@ namespace DriftCircuit
         }
 
         public RecordResult SaveResult(CourseDefinition course, TrialRules rules, double[] checkpoints,
-            GhostPose[] poses)
+            GhostPose[] poses, string driverId = null, string driverName = null)
         {
             if (rules.Phase != TrialPhase.Finished || rules.Laps != TrialRules.LapCount)
                 return RecordResult.None;
@@ -81,7 +83,7 @@ namespace DriftCircuit
                 // instance cannot publish an update based on an older record.
                 using var writer = File.Open(Path.Combine(directory, WriteLockName), FileMode.OpenOrCreate,
                     FileAccess.Write, FileShare.None);
-                return SaveLocked(course, rules, checkpoints, poses);
+                return SaveLocked(course, rules, checkpoints, poses, driverId, driverName);
             }
             catch (Exception error) when (IsStorageError(error))
             {
@@ -89,7 +91,8 @@ namespace DriftCircuit
             }
         }
 
-        private RecordResult SaveLocked(CourseDefinition course, TrialRules rules, double[] checkpoints, GhostPose[] poses)
+        private RecordResult SaveLocked(CourseDefinition course, TrialRules rules, double[] checkpoints,
+            GhostPose[] poses, string driverId, string driverName)
         {
             TrialRecord previous = Read(course);
             double fastestLap = rules.LapSplit(0);
@@ -108,6 +111,8 @@ namespace DriftCircuit
                 Revision = course.Revision,
                 BestLap = lapRecord ? fastestLap : previous.BestLap,
                 BestTotal = totalRecord ? rules.Elapsed : previous.BestTotal,
+                DriverId = totalRecord ? driverId : previous?.DriverId ?? driverId,
+                DriverName = totalRecord ? driverName : previous?.DriverName ?? driverName,
                 Checkpoints = totalRecord ? checkpoints : previous.Checkpoints,
                 Poses = totalRecord ? poses : previous.Poses
             };

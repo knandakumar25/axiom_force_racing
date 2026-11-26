@@ -5,15 +5,20 @@ namespace DriftCircuit
     /// <summary>Applies arcade handling, tire grip, drift charge, and boost to the kart body.</summary>
     internal sealed class TrialKart
     {
-        private const float BoostDuration = 1f;
-        private const float NormalSpeed = 25f;
         private readonly BoxCollider collider;
+        private readonly float boostDuration;
+        private readonly float normalSpeed;
+        private readonly float boostSpeed;
+        private readonly float baseAcceleration;
+        private readonly float steeringScale;
+        private readonly float driftChargeRate;
         private float charge;
         private double boost;
         private bool driftAllowed;
         private bool drifting;
 
         public Rigidbody Body { get; }
+        public DriverProfile Driver { get; }
         internal RaceItem HeldItem { get; private set; }
         internal bool RelayBoostHeld => HeldItem == RaceItem.RelayBoost;
         internal double ShieldRemaining { get; private set; }
@@ -39,11 +44,18 @@ namespace DriftCircuit
         public bool Grounded => Physics.Raycast(Body.position - Vector3.up * 0.20f, Vector3.down,
             0.55f, 1 << 0, QueryTriggerInteraction.Ignore);
 
-        /// <summary>Wraps the scene's interpolated kart body.</summary>
-        public TrialKart(Rigidbody body, BoxCollider collider)
+        /// <summary>Wraps the scene's interpolated kart body with optional driver handling stats.</summary>
+        public TrialKart(Rigidbody body, BoxCollider collider, DriverProfile driver = null)
         {
             Body = body;
             this.collider = collider;
+            Driver = driver ?? DriverProfile.Default;
+            normalSpeed = Driver.TopSpeed;
+            boostSpeed = Driver.BoostSpeed;
+            baseAcceleration = Driver.Acceleration;
+            steeringScale = Driver.SteeringScale;
+            driftChargeRate = Driver.DriftChargeRate;
+            boostDuration = Driver.BoostDuration;
         }
 
         public bool OverlapsAt(Vector3 position, Quaternion rotation, TrialKart other) =>
@@ -158,7 +170,7 @@ namespace DriftCircuit
         }
 
         /// <summary>Both boost sources refresh one timer and share the existing speed and acceleration.</summary>
-        internal void ActivateBoost() => boost = BoostDuration;
+        internal void ActivateBoost() => boost = boostDuration;
 
         /// <summary>Consumes only a successfully activated item, recording one use.</summary>
         internal void ConsumeItem() { ItemsUsedMask |= 1 << (int)HeldItem; HeldItem = RaceItem.None; ItemsUsed++; }
@@ -261,7 +273,7 @@ namespace DriftCircuit
             float sideways = Vector3.Dot(velocity, right);
             bool sliding = Mathf.Abs(steer) > 0.1f || Mathf.Abs(sideways) > 0.8f;
             drifting = driftHeld && driftAllowed && grounded && speed > 4f && sliding;
-            charge = drifting ? charge + dt : 0f;
+            charge = drifting ? charge + dt * driftChargeRate : 0f;
 
             if (!grounded)
             {
@@ -270,8 +282,8 @@ namespace DriftCircuit
             }
 
             bool drafting = !BoostActive && SlipstreamActive && inSlipstream && throttle > 0.02f && brake <= 0.02f;
-            float target = BoostActive ? 34f : drafting ? 30f : throttle * NormalSpeed;
-            float acceleration = BoostActive ? 29f : drafting ? 21f : 13f;
+            float target = BoostActive ? boostSpeed : drafting ? Mathf.Max(normalSpeed + 5f, 30f) : throttle * normalSpeed;
+            float acceleration = BoostActive ? 29f : drafting ? 21f : baseAcceleration;
             if (!BoostActive && AccelTapped && throttle > 0.02f && brake <= 0.02f)
                 acceleration = 5.5f;
             if (brake > 0.02f)
@@ -285,7 +297,7 @@ namespace DriftCircuit
             speed = Mathf.MoveTowards(speed, target, acceleration * dt);
             float lateral = sideways * Mathf.Exp(-(drifting ? 2.8f : 10f) * GripMultiplier * dt);
             Body.linearVelocity = forward * speed + right * lateral + Vector3.up * velocity.y;
-            float steeringRate = Mathf.Lerp(140f, 74f, Mathf.Abs(speed) / NormalSpeed);
+            float steeringRate = Mathf.Lerp(140f, 74f, Mathf.Abs(speed) / normalSpeed) * steeringScale;
             float motion = Mathf.Clamp(speed / 2.5f, -1f, 1f);
             Body.MoveRotation(Body.rotation * Quaternion.Euler(0, steer * motion * steeringRate * (drifting ? 1.28f : 1f) * dt, 0));
             if (advanceEffects) AdvanceEffects(dt);

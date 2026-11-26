@@ -14,6 +14,7 @@ import { createPool, waitForDatabase } from './db.js';
 import { purgeExpired } from './lib/tokens.js';
 import { processClerkDeletions } from './lib/accountDeletion.js';
 import { deleteClerkUser } from './lib/clerk.js';
+import { attachRaceRelay } from './lib/raceRelay.js';
 import { migrate } from './migrate.js';
 
 const config = loadConfig();
@@ -24,6 +25,7 @@ await migrate(pool, { log: console.log });
 const server = createApp({ config, pool }).listen(config.port, '0.0.0.0', () => {
   console.log(`Axiom Force accounts API listening on port ${config.port}`);
 });
+attachRaceRelay(server);
 
 /** Delete expired rows; errors are logged and retried next hour. */
 async function cleanUp() {

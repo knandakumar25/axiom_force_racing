@@ -15,7 +15,7 @@ The offline time trial runs for three laps on any of these circuits.
 | Spire Outer Hull (Skyline Cup) | Rising spiral hull or lower transfer ramp |
 | Apex Bastion Descent (Skyline Cup) | Fortress climb and high line or inner descent |
 
-Use **Cup: City Cup / Skyline Cup** on Track Select to switch cups, **Sign In / Sign Out** for Clerk browser authentication against the racing Express API (`http://localhost:8001/api/auth/browser-*`), and **Leaderboard** to view `/api/game/leaderboard/`.
+Use **Mode: 1P Solo / 2P Split / 3P Split / 4P Split** to select 1–4 local players, **P1 / P2** driver buttons to choose from the 6 *Axiom Force* operatives (**Cyber Shogun**, **Surya Prime**, **Oceanus**, **Mirage Blade**, **Apex Titan**, **Aura Phoenicia** — each with distinct handling stats and primitive placeholder kart silhouettes), **Cup: City Cup / Skyline Cup** to switch cups, **Sign In / Sign Out** for Clerk browser authentication against the racing Express API (`http://localhost:8001/api/auth/browser-*`), **Online** to host or join a WebSocket room (`/ws/race`), and **Leaderboard** to view `/api/game/leaderboard/`. Multi-player and Quick Race modes fill a **10-racer field** (`players + AI rivals = 10`), and local/synced Time Trial records store both circuit times and the driver who set them.
 
 Stratos Docks opens eastbound on a flat waterfront straight. Follow East Pier through the loading-yard chicane, take the westbound back straight to Quay Approach, then choose a route to the shared finish. Cross-road stripes mark the chicane braking zone. Amber dashes lead to the quay entrance.
 

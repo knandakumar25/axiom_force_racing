@@ -1427,7 +1427,7 @@ public sealed class TimeTrialPlayTests
         string[] names = { "Little Tokyo–Skyport", "Concrete Wards Viaduct", "Stratos Docks", "Rustrail Junction",
             TrialHud.QuickRaceName(CourseDefinition.Tokyo), TrialHud.QuickRaceName(CourseDefinition.Viaduct),
             TrialHud.QuickRaceName(CourseDefinition.Docks), TrialHud.QuickRaceName(CourseDefinition.Rustrail),
-            "Cup", "Sign In", "Leaderboard", "Route Beacon", "Ghost" };
+            "Mode", "P1 Driver", "P2 Driver", "Cup", "Sign In", "Online", "Leaderboard", "Route Beacon", "Ghost" };
         for (int device = 0; device < 2; device++)
         {
             yield return LoadScene(TimeTrial.MenuScenePath);
@@ -1752,6 +1752,71 @@ public sealed class TimeTrialPlayTests
             Debug.Log($"Stratos Docks lap {lap} waterfront peak: {waterfrontSpeed:F2} m/s.");
         }
         Pad(default);
+    }
+
+    [UnityTest]
+    public IEnumerator TrackSelectCyclesDriversAndSupportsMultiPlayerTenRacerField()
+    {
+        yield return LoadScene(TimeTrial.MenuScenePath);
+        Assert.That(trial.P1Driver.DisplayName, Is.EqualTo("Cyber Shogun"));
+        Assert.That(trial.P2Driver.DisplayName, Is.EqualTo("Surya Prime"));
+        Assert.That(trial.PlayerCount, Is.EqualTo(1));
+
+        // Cycle P1 -> Surya Prime, P2 -> Oceanus, Mode -> 2P Split.
+        GameObject.Find("P1 Driver").GetComponent<Button>().onClick.Invoke();
+        GameObject.Find("P2 Driver").GetComponent<Button>().onClick.Invoke();
+        GameObject.Find("Mode").GetComponent<Button>().onClick.Invoke();
+        yield return null;
+
+        Assert.That(trial.P1Driver.DisplayName, Is.EqualTo("Surya Prime"));
+        Assert.That(trial.P2Driver.DisplayName, Is.EqualTo("Oceanus"));
+        Assert.That(trial.PlayerCount, Is.EqualTo(2));
+        Assert.That(trial.TwoPlayerMode, Is.True);
+
+        GameObject.Find(CourseDefinition.Tokyo.Name).GetComponent<Button>().onClick.Invoke();
+        yield return null;
+
+        Assert.That(trial.PlayerKart, Is.Not.Null);
+        Assert.That(trial.Player2Kart, Is.Not.Null);
+        Assert.That(trial.PlayerKart.Driver.DisplayName, Is.EqualTo("Surya Prime"));
+        Assert.That(trial.Player2Kart.Driver.DisplayName, Is.EqualTo("Oceanus"));
+        Assert.That(trial.PlayerKarts.Length + trial.AiRivals.Count, Is.EqualTo(10));
+
+        Camera[] cameras = Object.FindObjectsByType<Camera>(FindObjectsSortMode.None);
+        Assert.That(cameras.Length, Is.EqualTo(2));
+        bool hasLeft = System.Array.Exists(cameras, c => Mathf.Approximately(c.rect.x, 0f) && Mathf.Approximately(c.rect.width, 0.5f));
+        bool hasRight = System.Array.Exists(cameras, c => Mathf.Approximately(c.rect.x, 0.5f) && Mathf.Approximately(c.rect.width, 0.5f));
+        Assert.That(hasLeft && hasRight, Is.True, "2P split-screen cameras must occupy left and right halves.");
+
+        // Verify independent P1 (W) and P2 (UpArrow) driving inputs after countdown.
+        yield return new WaitUntil(() => trial.Rules.Phase == TrialPhase.Racing);
+        Keys(Key.W);
+        for (int i = 0; i < 15; i++)
+            yield return new WaitForFixedUpdate();
+        Assert.That(trial.PlayerKart.ForwardSpeed, Is.GreaterThan(1.5f));
+        Assert.That(trial.Player2Kart.ForwardSpeed, Is.LessThan(0.5f));
+
+        Keys(Key.UpArrow);
+        for (int i = 0; i < 15; i++)
+            yield return new WaitForFixedUpdate();
+        Assert.That(trial.Player2Kart.ForwardSpeed, Is.GreaterThan(1.5f));
+        Keys();
+
+        // Return to Track Select and cycle Mode to 4P Split (4 players + 6 AI rivals = 10 racers).
+        yield return LoadScene(TimeTrial.MenuScenePath);
+        GameObject.Find("Mode").GetComponent<Button>().onClick.Invoke(); // 2P
+        GameObject.Find("Mode").GetComponent<Button>().onClick.Invoke(); // 3P
+        GameObject.Find("Mode").GetComponent<Button>().onClick.Invoke(); // 4P
+        yield return null;
+        Assert.That(trial.PlayerCount, Is.EqualTo(4));
+
+        GameObject.Find(CourseDefinition.Tokyo.Name).GetComponent<Button>().onClick.Invoke();
+        yield return null;
+        Assert.That(trial.PlayerKarts.Length, Is.EqualTo(4));
+        Assert.That(trial.AiRivals.Count, Is.EqualTo(6));
+        Assert.That(trial.PlayerKarts.Length + trial.AiRivals.Count, Is.EqualTo(10));
+        Camera[] fourCams = Object.FindObjectsByType<Camera>(FindObjectsSortMode.None);
+        Assert.That(fourCams.Length, Is.EqualTo(4));
     }
 
     /// <summary>Waits for fixed-step charge after queued input reaches the player loop.</summary>
