@@ -92,7 +92,7 @@ Install the official Unity CLI and Unity Editor **6000.3.29f1** on Windows. Sign
 unity open ./Game
 ```
 
-Use the Windows Unity CLI for Editor operations, imports and Unity tests. Unity Package Manager resolves the project's dependencies on first open. The project uses URP, the Input System and Unity Pipeline. Inkle Ink is installed for optional tooling and is currently unused.
+Use the Windows Unity CLI for Editor operations, imports and Unity tests. Unity Package Manager resolves the project's dependencies on first open. The project uses URP, the Input System and Unity Pipeline. The manifest also includes Unity Analytics, Cloud Diagnostics and Push Notifications.
 
 Tripo DCC Bridge 1.0.14 is an optional local Editor plugin. Download the [official Unity Bridge ZIP](https://www.tripo3d.ai/blog/tripo-dcc-bridge-for-unity) and extract its package folder to `Game/Packages/com.tripo3d.unitybridge/` if you need it. The directory should directly contain the vendor's `package.json`. Git excludes the vendor files, so each checkout can install the plugin locally. See [HANDOFF.md](../HANDOFF.md#drift-circuit) for the Windows certificate workaround if package resolution fails.
 

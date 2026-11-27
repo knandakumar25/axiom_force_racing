@@ -29,6 +29,8 @@ services-config.json
 /Game/*.sln
 /Game/*.slnx
 /Game/sysinfo.txt
+/Game/Assets/InitTestScene*
+/Game/ProjectSettings/SceneTemplateSettings.json
 *.user
 *.userprefs
 *.suo
@@ -45,6 +47,7 @@ __pycache__/
 .vs/
 .idea/
 /.vscode/
+/Game/.vscode/
 /graphify-out/
 /.validation/
 /test-results/
