@@ -1,0 +1,6 @@
+{
+    "name": "DriftCircuit.Editor",
+    "rootNamespace": "DriftCircuit",
+    "references": ["DriftCircuit"],
+    "includePlatforms": ["Editor"]
+}

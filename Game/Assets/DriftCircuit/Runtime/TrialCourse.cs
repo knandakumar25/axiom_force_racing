@@ -8,6 +8,7 @@ namespace DriftCircuit
     internal sealed class TrialCourse
     {
         private readonly CourseDefinition definition;
+        private readonly TrialVisualCatalog visuals;
         private readonly Transform root;
         private readonly List<Object> owned;
         private readonly Material road, shortcut, rail, cyan, amber, white, dark;
@@ -20,11 +21,13 @@ namespace DriftCircuit
         internal RailCrossing Crossing => crossing;
 
         /// <summary>Creates shared materials and records them for scene teardown.</summary>
-        public TrialCourse(CourseDefinition definition, Transform root, List<Object> owned)
+        public TrialCourse(CourseDefinition definition, Transform root, List<Object> owned,
+            TrialVisualCatalog visuals = null)
         {
             this.definition = definition;
             this.root = root;
             this.owned = owned;
+            this.visuals = visuals;
             road = Paint(0x263445);
             shortcut = Paint(0x433e38);
             rail = Paint(0x203446);
@@ -64,10 +67,76 @@ namespace DriftCircuit
                     CourseDefinition.Surface.Dark => dark,
                     _ => rail
                 };
-                Cube(landmark.Name, landmark.Position, landmark.Scale, Quaternion.Euler(0, landmark.Yaw, 0), material, landmark.Solid);
+                Quaternion rotation = Quaternion.Euler(0, landmark.Yaw, 0);
+                string model = TrialScenery.ModelFor(landmark.Name);
+                // Shop fronts face the road west of the market. The quarter turn keeps the authored footprint.
+                bool market = model == "shop" || model == "awning";
+                Quaternion modelRotation = market ? rotation * Quaternion.Euler(0, 90, 0) : rotation;
+                Vector3 modelSize = market ? new Vector3(landmark.Scale.z, landmark.Scale.y, landmark.Scale.x) : landmark.Scale;
+                bool replaced = model != null && visuals && visuals.TryPlace(model, root, landmark.Position,
+                    modelSize, modelRotation, landmark.Name + " model", out _);
+                if (!replaced || landmark.Solid)
+                {
+                    GameObject block = Cube(landmark.Name, landmark.Position, landmark.Scale, rotation, material, landmark.Solid);
+                    block.GetComponent<Renderer>().enabled = !replaced;
+                }
             }
+            if (visuals)
+                foreach (TrialScenery.Placement placement in TrialScenery.Dressing(definition))
+                {
+                    Quaternion rotation = Quaternion.Euler(0, placement.Yaw, 0);
+                    if (ClearsRoute(placement, rotation, main, true) && ClearsRoute(placement, rotation, branch, false))
+                        PlaceDressing(placement, rotation);
+                }
             if (definition == CourseDefinition.Rustrail || definition == CourseDefinition.Foundry)
                 crossing = new RailCrossing(this, dark, rail);
+        }
+
+        /// <summary>Places a scenery prop or stacks separate facade modules within one cleared footprint.</summary>
+        private void PlaceDressing(TrialScenery.Placement placement, Quaternion rotation)
+        {
+            if (placement.Model != "spire")
+            {
+                visuals.TryPlace(placement.Model, root, placement.Position, placement.Size, rotation,
+                    placement.Model + " scenery", out _);
+                return;
+            }
+
+            int floors = Mathf.RoundToInt(placement.Size.y / 4f) - 2;
+            float step = placement.Size.y / (floors + 2);
+            Vector3 size = new(placement.Size.x, step, placement.Size.z);
+            Vector3 center = placement.Position - Vector3.up * (placement.Size.y - step) * 0.5f;
+            for (int level = 0; level < floors + 2; level++)
+            {
+                string key = level == 0 ? "spire-base" : level == floors + 1 ? "spire-roof" : "spire-floor";
+                visuals.TryPlace(key, root, center + Vector3.up * (step * level), size, rotation,
+                    key + " scenery", out _);
+            }
+        }
+
+        /// <summary>Checks the rotated footprint against the road and its edge markers, including elevated routes.</summary>
+        private static bool ClearsRoute(TrialScenery.Placement placement, Quaternion rotation,
+            List<Station> route, bool closed)
+        {
+            Vector3 right = rotation * Vector3.right;
+            Vector3 forward = rotation * Vector3.forward;
+            int segments = closed ? route.Count : route.Count - 1;
+            Vector2 center = new(placement.Position.x, placement.Position.z);
+            for (int i = 0; i < segments; i++)
+            {
+                Station first = route[i], next = route[(i + 1) % route.Count];
+                Vector2 start = new(first.Center.x, first.Center.z);
+                Vector2 segment = new(next.Center.x - start.x, next.Center.z - start.y);
+                float t = segment.sqrMagnitude > 0 ? Mathf.Clamp01(Vector2.Dot(center - start, segment) / segment.sqrMagnitude) : 0;
+                Vector2 offset = center - (start + t * segment);
+                float distance = offset.magnitude;
+                if (distance < 0.001f) return false;
+                Vector3 direction = new(offset.x / distance, 0, offset.y / distance);
+                float radius = (placement.Size.x * Mathf.Abs(Vector3.Dot(direction, right)) +
+                    placement.Size.z * Mathf.Abs(Vector3.Dot(direction, forward))) * 0.5f;
+                if (distance < radius + Mathf.Lerp(first.Width, next.Width, t) + 1f) return false;
+            }
+            return true;
         }
 
         /// <summary>Applies the crossing phase when this circuit has a timed shortcut.</summary>

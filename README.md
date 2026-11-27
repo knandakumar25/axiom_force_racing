@@ -57,6 +57,34 @@ The ghost replays the fastest completed run on the chosen circuit. It appears by
 
 Quick Race results appear when you finish. An unfinished rival is listed second as **Still racing**, and a same-step finish shares first place. Retry restarts both karts. Ghosts, checkpoint deltas, and personal bests are time-trial features.
 
+### Optional Synty visuals
+
+With the Synty Student & Educator bundle imported under `Game/Assets/SyntyStudios/`, exit Play Mode and choose **Drift Circuit → Build Local Synty Visuals**. Unity resolves the exact prefab names below inside their pack's `Prefabs/` folder. The command reports missing or ambiguous selections together and publishes a replacement catalog only after all render-only assets are ready. It can be run again after reimporting the bundle.
+
+The generated URP materials and prefabs live under `Game/Assets/DriftCircuitLocal/`. Keep both that folder and the licensed vendor folder local. A checkout without the catalog automatically uses the primitive vehicles and scenery. The race uses a shared vehicle setup for local players, rivals and remote racers.
+
+| Driver | Synty pack | Prefab |
+| --- | --- | --- |
+| Baseline and Cyber Shogun | Polygon Prototype | `SM_Veh_Car_Sports_01` |
+| Surya Prime | Polygon City | `SM_Veh_Car_Muscle_01` |
+| Oceanus | Polygon City | `SM_Veh_Car_Sedan_01` |
+| Mirage Blade | Polygon City | `SM_Veh_Car_Small_01` |
+| Apex Titan | Polygon City | `SM_Veh_Car_Van_01` |
+| Aura Phoenicia | Polygon City | `SM_Veh_Car_Medium_01` |
+
+| Circuit | Scenery prefabs |
+| --- | --- |
+| Little Tokyo–Skyport | City `SM_Bld_OfficeOld_Small_01`, `SM_Bld_OfficeOld_Small_Roof_01`, `SM_Bld_Shop_03`, `SM_Bld_Shop_Cover_03` |
+| Concrete Wards Viaduct | City `SM_Env_Bridge_Underside_01`, `SM_Env_Bridge_Support_01`, `SM_Env_Bridge_Pillar_01` |
+| Stratos Docks | City bridge parts, `SM_Env_Street_Divider_01`, `SM_Env_WaterEdge_Straight_01` and `SM_Prop_Pallet_01`, plus Prototype `SM_Prop_Crate_03` |
+| Rustrail Junction | City `SM_Prop_Pipe_Preset_03`, `SM_Prop_Vents_Exhaust_01`, plus Prototype `SM_Prop_Crate_03` |
+| Foundry Forge | Prototype `SM_Buildings_WallWindowDouble_5x3_01` and the City pipe and vent |
+| Cyber Grave | City `SM_Prop_Roof_Aircon_03`, `SM_Prop_Trashbin_02` |
+| Spire Hull | City `SM_Bld_OfficeOld_Large_Base_01`, `SM_Bld_OfficeOld_Large_Floor_01`, `SM_Bld_OfficeOld_Large_Roof_01` |
+| Apex Bastion Descent | Knights `SM_Bld_Castle_Tower_03`, `SM_Bld_Castle_Wall_01` |
+
+The catalog fits landmark meshes to the existing authored bounds. The tunnel roof keeps its original collision box for driving and camera obstruction. Track and shortcut surfaces, foundations, crossing signals, tunnel header, braking stripes, quay markings, barriers, gates and item effects use their authored geometry.
+
 ### Run the Unity tests
 
 With the project open in the licensed Windows Editor, run these commands from the repository root. Poll the second command until the run finishes.
@@ -71,6 +99,8 @@ The Play Mode suite uses virtual keyboard, gamepad and mouse input. It drives ea
 Rustrail Quick Race tests cover scheduled route decisions, both committed routes, approach occupancy, closure deferral with either kart or both, delayed entry, recovery before the fork, pause, Retry, and return to Track Select. A virtual gamepad drives both player routes and compares all four seeded record files byte for byte and checks the Ghost preference. A separate run requires the rival to finish three laps within 200 seconds with zero recoveries and no player driving input.
 
 Docks Quick Race tests cover the shared GO step, physical contact, pause, occupied and stuck recovery, both finish orders, a shared first, Retry, and return to Track Select. A virtual gamepad drives the player through the yard, quay, and yard and compares all four seeded time-trial record files byte for byte. A separate run checks that the rival completes three loading-yard laps within 175 seconds with zero recoveries while the player provides no driving input.
+
+The Synty visual pass passed **108 Edit Mode and 28 Play Mode tests**, plus **183 backend tests**. A checkout without the bundle or catalog passed the driving and recovery smoke test. The final Unity Console check found zero new errors or warnings. Local evidence is in .validation/synty-visuals/.
 
 The final Skyline Cup and Browser Sign-In Windows Unity CLI run passed **103 Edit Mode cases and 27 Play Mode tests** (`130/130` combined, `700.25s`), with zero new Console errors or warnings (cursors 201–244). Backend tests passed 182/182. Evidence is saved locally in `.validation/skyline-auth/`.
 

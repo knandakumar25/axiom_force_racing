@@ -25,6 +25,7 @@ namespace DriftCircuit
         private IRacingSaveStore saveStore;
         private TrialRecord comparison;
         private TrialGhost ghost;
+        private TrialVisualCatalog visuals;
         private RecordResult result;
         private double? checkpointDelta;
         private bool showGhost;
@@ -92,6 +93,7 @@ namespace DriftCircuit
         /// <summary>Creates the course, kart, view, and HUD from the saved scene entry point.</summary>
         private void Awake()
         {
+            visuals = Resources.Load<TrialVisualCatalog>(TrialVisualCatalog.ResourceName);
             input = new TrialInput();
             netClient = new NetRaceClient();
             records = new TrialRecordStore(RecordDirectoryOverride ??
@@ -120,7 +122,7 @@ namespace DriftCircuit
             onlineRaceActive = online;
             raceRoot = new GameObject(definition.Name);
             raceRoot.transform.SetParent(transform, false);
-            course = new TrialCourse(definition, raceRoot.transform, owned);
+            course = new TrialCourse(definition, raceRoot.transform, owned, visuals);
             course.Build();
             course.ShowRouteBeacon(showBeacon);
             input.SetPlayerCount(playerCount);
@@ -898,7 +900,7 @@ namespace DriftCircuit
                 Quaternion.LookRotation(focus - cam.position), blend);
         }
 
-        /// <summary>Creates a primitive driver kart and the single collider that controls its handling.</summary>
+        /// <summary>Creates the shared kart physics and applies the selected driver's visual model.</summary>
         private TrialKart BuildKart(string name, DriverProfile driver, out Material lights)
         {
             driver ??= DriverProfile.Default;
@@ -920,27 +922,59 @@ namespace DriftCircuit
             collider.sharedMaterial = grip;
             owned.Add(grip);
 
+            lights = course.Paint(0xffd47b, true);
+            if (visuals && visuals.TryPlace(driver.Chassis.ToString(), obj.transform, new(0, 0.06f, 0),
+                new(1.49f, 1.12f, 2.44f), Quaternion.identity, "Driver vehicle", out GameObject model))
+            {
+                BuildTailLamps(driver, model.transform, lights);
+            }
+            else
+            {
+                BuildPrimitiveKart(driver, obj.transform, lights);
+            }
+            return new TrialKart(body, collider, driver);
+        }
+
+        /// <summary>Mounts two tail lamps on the fitted body's rear edge with the driver's accent color.</summary>
+        private void BuildTailLamps(DriverProfile driver, Transform model, Material lights)
+        {
+            Transform kartRoot = model.parent;
+            Material accent = course.Paint(driver.AccentColor);
+            foreach (string name in new[] { "Left tail lamp mount", "Right tail lamp mount" })
+            {
+                Transform mount = model.Find(name);
+                if (!mount) continue;
+                Vector3 point = kartRoot.InverseTransformPoint(mount.position);
+                course.Cube("Tail lamp trim", point, new(0.22f, 0.086f, 0.054f),
+                    Quaternion.identity, accent, parent: kartRoot);
+                course.Cube(name == "Left tail lamp mount" ? "Rear lights" : "Right tail lamp",
+                    point - Vector3.forward * 0.026f, new(0.17f, 0.050f, 0.021f),
+                    Quaternion.identity, lights, parent: kartRoot);
+            }
+        }
+
+        /// <summary>Provides the original kart visuals when the local art catalog is absent.</summary>
+        private void BuildPrimitiveKart(DriverProfile driver, Transform parent, Material lights)
+        {
             Material paint = course.Paint(driver.PrimaryColor);
             Material accent = course.Paint(driver.AccentColor);
             Material rubber = course.Paint(0x121b26);
-            lights = course.Paint(0xffd47b, true);
-            course.Cube("Chassis", new(0, -0.12f, 0), new(1.35f, 0.4f, 2.35f), Quaternion.identity, paint, parent: obj.transform);
-            course.Cube("Seat", new(0, 0.18f, -0.28f), new(0.78f, 0.42f, 0.84f), Quaternion.identity, rubber, parent: obj.transform);
-            course.Cube("Rear lights", new(0, -0.06f, -1.18f), new(1.15f, 0.11f, 0.1f), Quaternion.identity, lights, parent: obj.transform);
-            BuildDriverParts(driver.Chassis, obj.transform, accent);
+            course.Cube("Chassis", new(0, -0.12f, 0), new(1.35f, 0.4f, 2.35f), Quaternion.identity, paint, parent: parent);
+            course.Cube("Seat", new(0, 0.18f, -0.28f), new(0.78f, 0.42f, 0.84f), Quaternion.identity, rubber, parent: parent);
+            course.Cube("Rear lights", new(0, -0.06f, -1.18f), new(1.15f, 0.11f, 0.1f), Quaternion.identity, lights, parent: parent);
+            BuildDriverParts(driver.Chassis, parent, accent);
             for (int x = -1; x <= 1; x += 2)
             for (int z = -1; z <= 1; z += 2)
             {
                 GameObject tire = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
                 tire.name = "Tire";
-                tire.transform.SetParent(obj.transform, false);
+                tire.transform.SetParent(parent, false);
                 tire.transform.SetLocalPositionAndRotation(new Vector3(x * 0.70f, -0.25f, z * 0.79f),
                     Quaternion.Euler(0, 0, 90));
                 tire.transform.localScale = new Vector3(0.48f, 0.15f, 0.48f);
                 tire.GetComponent<Renderer>().sharedMaterial = rubber;
                 tire.GetComponent<Collider>().enabled = false;
             }
-            return new TrialKart(body, collider, driver);
         }
 
         private void BuildDriverParts(ChassisStyle style, Transform parent, Material accent)

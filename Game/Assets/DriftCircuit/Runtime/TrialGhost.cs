@@ -11,19 +11,33 @@ namespace DriftCircuit
         {
             model = new GameObject("Personal best ghost");
             model.transform.SetParent(parent, false);
-            foreach (MeshFilter source in kart.GetComponentsInChildren<MeshFilter>())
-            {
-                var part = new GameObject(source.name, typeof(MeshFilter), typeof(MeshRenderer));
-                Transform pose = source.transform;
-                part.transform.SetParent(model.transform, false);
-                part.transform.SetLocalPositionAndRotation(pose.localPosition, pose.localRotation);
-                part.transform.localScale = pose.localScale;
-                part.GetComponent<MeshFilter>().sharedMesh = source.sharedMesh;
-                var renderer = part.GetComponent<MeshRenderer>();
-                renderer.sharedMaterial = material;
-                renderer.shadowCastingMode = ShadowCastingMode.Off;
-            }
+            CopyMeshes(kart, model.transform, material);
             model.SetActive(false);
+        }
+
+        /// <summary>Copies local transforms and all mesh slots without inheriting gameplay components.</summary>
+        private static void CopyMeshes(Transform source, Transform target, Material material)
+        {
+            if (source.TryGetComponent(out MeshFilter filter) && filter.sharedMesh &&
+                source.TryGetComponent(out MeshRenderer original) && original.enabled)
+            {
+                target.gameObject.AddComponent<MeshFilter>().sharedMesh = filter.sharedMesh;
+                var renderer = target.gameObject.AddComponent<MeshRenderer>();
+                var slots = new Material[filter.sharedMesh.subMeshCount];
+                System.Array.Fill(slots, material);
+                renderer.sharedMaterials = slots;
+                renderer.shadowCastingMode = ShadowCastingMode.Off;
+                renderer.receiveShadows = false;
+            }
+            foreach (Transform child in source)
+            {
+                if (!child.gameObject.activeSelf || !child.GetComponentInChildren<MeshFilter>()) continue;
+                var copy = new GameObject(child.name).transform;
+                copy.SetParent(target, false);
+                copy.SetLocalPositionAndRotation(child.localPosition, child.localRotation);
+                copy.localScale = child.localScale;
+                CopyMeshes(child, copy, material);
+            }
         }
 
         public void Refresh(TrialRecord record, double elapsed, double renderTime, bool racing)

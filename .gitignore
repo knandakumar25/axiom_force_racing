@@ -35,7 +35,11 @@ services-config.json
 *.userprefs
 *.suo
 
-# Optional vendor download
+# Optional vendor downloads and generated licensed art
+/Game/Assets/SyntyStudios/
+/Game/Assets/SyntyStudios.meta
+/Game/Assets/DriftCircuitLocal/
+/Game/Assets/DriftCircuitLocal.meta
 /Game/Packages/com.tripo3d.unitybridge/
 
 # Tool caches and local editor settings
