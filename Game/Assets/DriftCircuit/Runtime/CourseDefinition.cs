@@ -161,8 +161,9 @@ namespace DriftCircuit
 
         private static readonly Station[] CyberGraveRamp =
         {
-            new(-68, 16, 4.2f), new(new Vector3(-74, 1.8f, 2), 4.2f), new(new Vector3(-74, 3.0f, -10), 4.2f),
-            new(new Vector3(-74, 1.4f, -24), 4.2f), new(-68, -46, 4.2f), new(-68, -54, 6.6f)
+            new(-68, 16, 4.2f), new(new Vector3(-79, 1.4f, 3), 4.2f, 5f),
+            new(new Vector3(-82, 2.8f, -11), 4.2f, 8f), new(new Vector3(-79, 1.6f, -27), 4.2f, 5f),
+            new(-68, -46, 4.2f), new(-68, -54, 6.6f)
         };
 
         private static readonly Station[] SpireHullMain =
@@ -187,7 +188,8 @@ namespace DriftCircuit
             new(new Vector3(78, 4.8f, 22), 7.4f), new(new Vector3(48, 4.2f, 60), 7.4f),
             new(new Vector3(-46, 2.8f, 60), 7.4f), new(new Vector3(-76, 2.0f, 44), 7.4f),
             new(new Vector3(-76, 1.6f, 34), 7.4f), new(new Vector3(-76, 1.2f, 24), 7.4f),
-            new(new Vector3(-76, 0.4f, -10), 7.4f), new(-76, -30, 7.4f), new(-76, -44, 7.4f),
+            new(new Vector3(-88, 1.15f, 9), 7.4f, -6f), new(new Vector3(-90, 0.75f, -9), 7.4f, -8f),
+            new(new Vector3(-86, 0.25f, -29), 7.4f, -5f), new(-76, -44, 7.4f),
             new(-76, -54, 7.4f), new(-50, -64, 7.2f), new(-24, -64, 7.2f)
         };
 
@@ -209,14 +211,14 @@ namespace DriftCircuit
             new Landmark[] { new("Foundry floor", new(0, -3, 0), new(224, 1, 189), Surface.Dark) }, Cup.Skyline);
 
         public static readonly CourseDefinition CyberGrave = new(
-            "cyber-grave-circuit", "Cyber Grave Circuit", 1, new(4, 0.58f, -62), Vector3.right,
+            "cyber-grave-circuit", "Cyber Grave Circuit", 2, new(4, 0.58f, -62), Vector3.right,
             new Checkpoint[]
             {
                 new("Scrap Yard", new(76, 0, -10), Vector3.forward, 6.4f),
                 new("North Ridge", new(0, 0, 54), Vector3.left, 6.8f),
                 new("Ramp Approach", new(-68, 0, 26), Vector3.back, 6.4f),
                 new("Finish", new(0, 0, -62), Vector3.right, 6.6f)
-            }, CyberGraveMain, CyberGraveRamp, 4, "Salvage hairpin", "Jump ramp",
+            }, CyberGraveMain, CyberGraveRamp, 4, "Salvage hairpin", "Ridge ramp",
             new Landmark[] { new("Salvage yard", new(0, -3, 0), new(210, 1, 175), Surface.Dark) }, Cup.Skyline);
 
         public static readonly CourseDefinition SpireHull = new(
@@ -231,14 +233,14 @@ namespace DriftCircuit
             new Landmark[] { new("Spire base", new(0, -3, 0), new(210, 1, 175), Surface.Dark) }, Cup.Skyline);
 
         public static readonly CourseDefinition ApexDescent = new(
-            "apex-bastion-descent", "Apex Bastion Descent", 1, new(4, 0.58f, -64), Vector3.right,
+            "apex-bastion-descent", "Apex Bastion Descent", 2, new(4, 0.58f, -64), Vector3.right,
             new Checkpoint[]
             {
                 new("Bastion Climb", new(78, 4.2f, -4), Vector3.forward, 7f),
                 new("High Crest", new(0, 3.5f, 60), Vector3.left, 7.2f),
                 new("Descent Split", new(-76, 2.2f, 46), Vector3.back, 7.2f),
                 new("Finish", new(0, 0, -64), Vector3.right, 7f)
-            }, ApexBastionMain, ApexBastionInner, 3, "High line", "Inner descent",
+            }, ApexBastionMain, ApexBastionInner, 3, "Outer descent", "Inner descent",
             new Landmark[] { new("Bastion plateau", new(0, -3, 0), new(220, 1, 185), Surface.Dark) }, Cup.Skyline);
 
         internal enum Cup { City, Skyline }

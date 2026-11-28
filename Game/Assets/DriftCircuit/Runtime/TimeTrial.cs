@@ -118,6 +118,7 @@ namespace DriftCircuit
         /// <summary>Creates a solo time trial, 10-racer Quick Race, 2-4P split-screen race, or online race.</summary>
         private void StartCircuit(CourseDefinition definition, bool quickRace, bool online)
         {
+            if (Rules != null) return;
             Circuit = definition;
             onlineRaceActive = online;
             raceRoot = new GameObject(definition.Name);
@@ -233,6 +234,8 @@ namespace DriftCircuit
                 raceRoot.SetActive(false);
                 Destroy(raceRoot);
                 ReleaseRaceResources();
+                raceRoot = null;
+                course = null;
             }
             Rules = null;
             player2Rules = null;
@@ -375,6 +378,7 @@ namespace DriftCircuit
 
         private void ReleaseRaceResources()
         {
+            course?.Environment.RestoreLighting();
             foreach (Object item in owned)
                 Destroy(item);
             owned.Clear();
@@ -1048,6 +1052,7 @@ namespace DriftCircuit
         /// <summary>Creates 1-4 split-screen race cameras and directional lighting.</summary>
         private void BuildView(int activePlayers)
         {
+            course.Environment.ApplyLighting();
             chaseCameras = new Transform[activePlayers];
             Rect[] rects = activePlayers switch
             {
@@ -1063,11 +1068,11 @@ namespace DriftCircuit
                 chaseCameras[p] = view.transform;
                 chaseCameras[p].SetParent(raceRoot.transform, false);
                 Camera cam = view.AddComponent<Camera>();
-                cam.clearFlags = CameraClearFlags.SolidColor;
+                cam.clearFlags = CameraClearFlags.Skybox;
                 cam.backgroundColor = new Color(0.07f, 0.10f, 0.17f);
                 cam.fieldOfView = 68f;
                 cam.nearClipPlane = 0.15f;
-                cam.farClipPlane = 230f;
+                cam.farClipPlane = 580f;
                 cam.rect = rects[p];
                 if (p == 0)
                     view.AddComponent<AudioListener>();
@@ -1075,14 +1080,6 @@ namespace DriftCircuit
             chaseCamera = chaseCameras[0];
             chaseCamera2 = activePlayers >= 2 ? chaseCameras[1] : null;
 
-            var sun = new GameObject("Circuit light");
-            sun.transform.SetParent(raceRoot.transform, false);
-            sun.transform.rotation = Quaternion.Euler(52, -30, 0);
-            Light light = sun.AddComponent<Light>();
-            light.type = LightType.Directional;
-            light.color = new Color(0.84f, 0.91f, 1f);
-            light.intensity = 1.6f;
-            light.shadows = LightShadows.Soft;
         }
     }
 }

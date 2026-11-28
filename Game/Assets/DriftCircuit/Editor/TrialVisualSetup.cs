@@ -45,7 +45,19 @@ namespace DriftCircuit
             ("spire-floor", City, "SM_Bld_OfficeOld_Large_Floor_01"),
             ("spire-roof", City, "SM_Bld_OfficeOld_Large_Roof_01"),
             ("keep", Knights, "SM_Bld_Castle_Tower_03"),
-            ("castle-wall", Knights, "SM_Bld_Castle_Wall_01")
+            ("castle-wall", Knights, "SM_Bld_Castle_Wall_01"),
+            ("road-patch", City, "SM_Env_Road_Patch_01"),
+            ("sidewalk", City, "SM_Env_Sidewalk_Straight_01"),
+            ("gutter", City, "SM_Env_Sidewalk_Gutter_01"),
+            ("cloud", Prototype, "SM_Generic_Cloud_02"),
+            ("street-tree", Prototype, "SM_Prop_Tree_Round_01"),
+            ("pine", Prototype, "SM_Prop_Tree_Pine_01"),
+            ("grass", Prototype, "SM_Generic_Grass_Patch_01"),
+            ("scrub", Prototype, "SM_Prop_Tree_Bush_01"),
+            ("mound", Knights, "SM_Env_GroundMound_01"),
+            ("upland-tree", Knights, "SM_Env_Tree_02"),
+            ("rock", Knights, "SM_Env_RockPile_01"),
+            ("retaining-wall", Knights, "SM_Bld_Rockwall_Straight_01")
         };
 
         /// <summary>Runs the catalog builder from the Editor menu.</summary>

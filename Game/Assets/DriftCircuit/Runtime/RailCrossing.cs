@@ -82,12 +82,18 @@ namespace DriftCircuit
         private static void BuildGantry(TrialCourse course, string name, float west, float east,
             float height, float z, Material support)
         {
-            course.Cube(name + " beam", new((west + east) * 0.5f, height, z - 0.22f),
+            z -= 0.22f;
+            course.Cube(name + " beam", new((west + east) * 0.5f, height, z),
                 new(east - west, 0.24f, 0.3f), Quaternion.identity, support);
-            course.Cube(name + " west support", new(west, height * 0.5f, z - 0.22f),
-                new(0.24f, height, 0.34f), Quaternion.identity, support);
-            course.Cube(name + " east support", new(east, height * 0.5f, z - 0.22f),
-                new(0.24f, height, 0.34f), Quaternion.identity, support);
+            PlacePost(" west support", west);
+            PlacePost(" east support", east);
+
+            void PlacePost(string suffix, float x)
+            {
+                float ground = course.Environment.GroundHeight(x, z) - 0.04f;
+                course.Cube(name + suffix, new(x, (height + ground) * 0.5f, z),
+                    new(0.24f, height - ground, 0.34f), Quaternion.identity, support);
+            }
         }
 
         /// <summary>Places the title and the live phase on the face of the board.</summary>

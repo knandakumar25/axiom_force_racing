@@ -61,7 +61,7 @@ Quick Race results appear when you finish. An unfinished rival is listed second 
 
 With the Synty Student & Educator bundle imported under `Game/Assets/SyntyStudios/`, exit Play Mode and choose **Drift Circuit → Build Local Synty Visuals**. Unity resolves the exact prefab names below inside their pack's `Prefabs/` folder. The command reports missing or ambiguous selections together and publishes a replacement catalog only after all render-only assets are ready. It can be run again after reimporting the bundle.
 
-The generated URP materials and prefabs live under `Game/Assets/DriftCircuitLocal/`. Keep both that folder and the licensed vendor folder local. A checkout without the catalog automatically uses the primitive vehicles and scenery. The race uses a shared vehicle setup for local players, rivals and remote racers.
+The generated URP materials and prefabs live under `Game/Assets/DriftCircuitLocal/`. Keep both that folder and the licensed vendor folder local. A checkout without the catalog still builds the sky, terrain, harbor water, and textured roads with project materials. It uses simple models for the vehicles and landmarks. Local players, rivals, and remote racers share the vehicle setup.
 
 | Driver | Synty pack | Prefab |
 | --- | --- | --- |
@@ -83,7 +83,30 @@ The generated URP materials and prefabs live under `Game/Assets/DriftCircuitLoca
 | Spire Hull | City `SM_Bld_OfficeOld_Large_Base_01`, `SM_Bld_OfficeOld_Large_Floor_01`, `SM_Bld_OfficeOld_Large_Roof_01` |
 | Apex Bastion Descent | Knights `SM_Bld_Castle_Tower_03`, `SM_Bld_Castle_Wall_01` |
 
-The catalog fits landmark meshes to the existing authored bounds. The tunnel roof keeps its original collision box for driving and camera obstruction. Track and shortcut surfaces, foundations, crossing signals, tunnel header, braking stripes, quay markings, barriers, gates and item effects use their authored geometry.
+| New catalog use | Pack | Prefabs |
+| --- | --- | --- |
+| Cargo yard patches and city walkways | Polygon City | `SM_Env_Road_Patch_01`, `SM_Env_Sidewalk_Straight_01`, `SM_Env_Sidewalk_Gutter_01` |
+| Clouds and roadside planting | Polygon Prototype | `SM_Generic_Cloud_02`, `SM_Prop_Tree_Round_01`, `SM_Prop_Tree_Pine_01`, `SM_Generic_Grass_Patch_01`, `SM_Prop_Tree_Bush_01` |
+| Upland trees, hills, rock, and retaining walls | Polygon Knights | `SM_Env_Tree_02`, `SM_Env_GroundMound_01`, `SM_Env_RockPile_01`, `SM_Bld_Rockwall_Straight_01` |
+
+### Circuit environments
+
+| Circuit | Race environment |
+| --- | --- |
+| Little Tokyo–Skyport | Afternoon light, planted market streets, and terminal buildings |
+| Concrete Wards Viaduct | Overcast light, concrete decks, embankments, and a lit service tunnel |
+| Stratos Docks | Coastal haze, animated harbor water, quay walls, and cargo yards |
+| Rustrail Junction | Late-afternoon light, scrub, gravel shoulders, and a timed crossing |
+| Foundry Forge | Warm dusk, factory facades, concrete, and pipework |
+| Cyber Grave Circuit | Cool twilight, rocky surroundings, salvage, and the banked Ridge ramp |
+| Spire Outer Hull | Early-morning light, raised road decks, planting, and office towers |
+| Apex Bastion Descent | Upland daylight, grassy slopes, stone walls, and a longer Outer descent |
+
+Road texture UVs follow the sampled road distance. The race builds the shoulders, curbs, reflectors, and route markings from the same banked edges. It shares the sky and lighting across every split-screen camera and restores the menu settings on return to Track Select. The service tunnel roof keeps its original collision box for driving and camera obstruction.
+
+Cyber Grave's 8.4-metre Ridge ramp and Apex Bastion's 14.8-metre Outer descent are **revision 2**. Apex still has the Inner descent. The revised routes use the same circuit IDs, checkpoints, and pickup locations. Revision 1 times and ghosts remain in their previous record files. The other six circuits still use revision 1.
+
+Chase-camera contact sheets, the four-player Docks capture, and the collider and render comparisons are saved locally under `.validation/environment-overhaul/`.
 
 ### Run the Unity tests
 
@@ -94,13 +117,15 @@ unity command --project-path ./Game test run --mode all --async-tests true
 unity command --project-path ./Game test status
 ```
 
-The Play Mode suite uses virtual keyboard, gamepad and mouse input. It drives each time trial through the main route, shortcut, and main route over three laps and checks access to every Track Select control. The Docks time trial requires at least 22 m/s on the waterfront and compares the yard and quay times from Quay Approach to Finish. Rustrail tests cover the crossing schedule, the branch barrier, checkpoint recovery, the timed route comparison, and ghost playback after Retry.
+The Play Mode suite uses virtual keyboard, gamepad and mouse input. It drives the City Cup time trials and the two revised Skyline Cup circuits through the main route, shortcut, and main route over three laps. It also checks access to every Track Select control. The Docks time trial requires at least 22 m/s on the waterfront and compares the yard and quay times from Quay Approach to Finish. Rustrail tests cover the crossing schedule, the branch barrier, checkpoint recovery, the timed route comparison, and ghost playback after Retry.
 
 Rustrail Quick Race tests cover scheduled route decisions, both committed routes, approach occupancy, closure deferral with either kart or both, delayed entry, recovery before the fork, pause, Retry, and return to Track Select. A virtual gamepad drives both player routes and compares all four seeded record files byte for byte and checks the Ghost preference. A separate run requires the rival to finish three laps within 200 seconds with zero recoveries and no player driving input.
 
 Docks Quick Race tests cover the shared GO step, physical contact, pause, occupied and stuck recovery, both finish orders, a shared first, Retry, and return to Track Select. A virtual gamepad drives the player through the yard, quay, and yard and compares all four seeded time-trial record files byte for byte. A separate run checks that the rival completes three loading-yard laps within 175 seconds with zero recoveries while the player provides no driving input.
 
-The Synty visual pass passed **108 Edit Mode and 28 Play Mode tests**, plus **183 backend tests**. A checkout without the bundle or catalog passed the driving and recovery smoke test. The final Unity Console check found zero new errors or warnings. Local evidence is in .validation/synty-visuals/.
+The environment overhaul passed **108 Edit Mode and 30 Play Mode tests**. The final Unity Console check found zero errors or warnings. The two revision 2 routes completed their controller and AI runs. A bundle-free checkout completed the three-lap Docks run and replayed its ghost. Local evidence is in `.validation/environment-overhaul/`.
+
+The earlier Synty visual pass passed **108 Edit Mode and 28 Play Mode tests**, plus **183 backend tests**. A checkout without the bundle or catalog passed the driving and recovery smoke test. That Unity Console check found zero new errors or warnings. Local evidence is in `.validation/synty-visuals/`.
 
 The final Skyline Cup and Browser Sign-In Windows Unity CLI run passed **103 Edit Mode cases and 27 Play Mode tests** (`130/130` combined, `700.25s`), with zero new Console errors or warnings (cursors 201–244). Backend tests passed 182/182. Evidence is saved locally in `.validation/skyline-auth/`.
 

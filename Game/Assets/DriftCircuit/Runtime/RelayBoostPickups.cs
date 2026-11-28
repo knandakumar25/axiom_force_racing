@@ -108,7 +108,7 @@ namespace DriftCircuit
                 return false;
             float start = Vector3.Dot(from - gate.Center, gate.Forward);
             float end = Vector3.Dot(to - gate.Center, gate.Forward);
-            float height = Mathf.LerpUnclamped(from.y, to.y, -start / (end - start));
+            float height = Mathf.LerpUnclamped(from.y, to.y, -start / (end - start)) - gate.Center.y;
             return height >= 0.15f && height <= 1.3f;
         }
 

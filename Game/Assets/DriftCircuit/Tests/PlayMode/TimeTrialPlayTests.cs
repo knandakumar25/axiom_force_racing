@@ -6,6 +6,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.LowLevel;
+using UnityEngine.InputSystem.UI;
 using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
 using UnityEngine.UI;
@@ -1482,6 +1483,8 @@ public sealed class TimeTrialPlayTests
 
     private static IEnumerator ClickMenuButton(Mouse mouse, Text label)
     {
+        // Keep desktop pointer activity from replacing state queued for the test mouse.
+        EventSystem.current.GetComponent<InputSystemUIInputModule>().pointerBehavior = UIPointerBehavior.AllPointersAsIs;
         Canvas.ForceUpdateCanvases();
         var button = (RectTransform)label.transform.parent;
         var corners = new Vector3[4];
@@ -1616,6 +1619,117 @@ public sealed class TimeTrialPlayTests
         Assert.That(trial, Is.Not.Null);
     }
 
+    /// <summary>Exercises the new ridge route and its versioned ghost through the normal race UI.</summary>
+    [UnityTest, Timeout(240000)]
+    public IEnumerator CyberGraveRevisionTwoControllerAndRivals() => DriveRedesignedCircuit(CourseDefinition.CyberGrave);
+
+    /// <summary>Exercises the new outer descent and the existing inner shortcut.</summary>
+    [UnityTest, Timeout(330000)]
+    public IEnumerator ApexBastionRevisionTwoControllerAndRivals() => DriveRedesignedCircuit(CourseDefinition.ApexDescent);
+
+    /// <summary>Verifies physical route traversal, version separation, pickup reach, and a live AI finish.</summary>
+    private IEnumerator DriveRedesignedCircuit(CourseDefinition circuit)
+    {
+        Assert.That(circuit.Revision, Is.EqualTo(2));
+        SeedGhost(circuit);
+        string oldPath = Path.Combine(recordDirectory, $"{circuit.Id}-r1.json");
+        string currentPath = Path.Combine(recordDirectory, $"{circuit.Id}-r2.json");
+        TrialRecord legacy = new TrialRecordStore(recordDirectory).Load(circuit);
+        legacy.Revision = 1;
+        string oldRecord = JsonUtility.ToJson(legacy);
+        File.Delete(currentPath);
+        File.WriteAllText(oldPath, oldRecord);
+
+        yield return LoadScene(TimeTrial.MenuScenePath);
+        GameObject.Find("Cup").GetComponent<Button>().onClick.Invoke();
+        GameObject.Find(circuit.Name).GetComponent<Button>().onClick.Invoke();
+        Assert.That(trial.Circuit, Is.SameAs(circuit));
+        yield return new WaitUntil(() => trial.Rules.Phase == TrialPhase.Racing);
+        int[] sectorFrames = new int[2], groundedFrames = new int[2];
+        var slowerRidgeFrames = new System.Collections.Generic.List<string>();
+        void Measure(bool shortcut)
+        {
+            Vector3 p = trial.KartBody.position;
+            if (shortcut && circuit == CourseDefinition.CyberGrave && p.x < -65 && p.z is > -53 and < 25 &&
+                Time.frameCount % 10 == 0 && trial.PlayerKart.ForwardSpeed < 10)
+                slowerRidgeFrames.Add($"{p.x:F1},{p.z:F1}={trial.PlayerKart.ForwardSpeed:F1} m/s");
+            if (p.z is <= -29 or >= 4 || p.x > -43) return;
+            int lane = shortcut ? 1 : 0;
+            sectorFrames[lane]++;
+            if (trial.PlayerKart.Grounded) groundedFrames[lane]++;
+        }
+        yield return DriveLap(false, 1, observe: () => Measure(false));
+        yield return DriveLap(true, 2, observe: () => Measure(true));
+        yield return DriveLap(false, 3, observe: () => Measure(false));
+        yield return null;
+        for (int i = 0; i < sectorFrames.Length; i++)
+        {
+            Assert.That(sectorFrames[i], Is.GreaterThan(30));
+            Assert.That((float)groundedFrames[i] / sectorFrames[i], Is.GreaterThan(0.9f));
+        }
+        TrialRecord record = new TrialRecordStore(recordDirectory).Load(circuit);
+        Assert.That(System.Array.Exists(record.Poses, pose => pose.Reset), Is.False);
+        Assert.That(record.Checkpoints, Has.Length.EqualTo(12));
+        for (int i = 1; i < record.Checkpoints.Length; i++)
+            Assert.That(record.Checkpoints[i], Is.GreaterThan(record.Checkpoints[i - 1]));
+        double mainA = record.Checkpoints[3] - record.Checkpoints[2];
+        double shortcut = record.Checkpoints[7] - record.Checkpoints[6];
+        double mainB = record.Checkpoints[11] - record.Checkpoints[10];
+        Debug.Log($"{circuit.Name} approach to finish: main {mainA:F2}s, shortcut {shortcut:F2}s, main {mainB:F2}s. " +
+            $"Grounded main {groundedFrames[0]}/{sectorFrames[0]}, branch {groundedFrames[1]}/{sectorFrames[1]} frames.");
+        Assert.That(shortcut, Is.LessThan(System.Math.Min(mainA, mainB)),
+            "Low-speed ridge samples: " + string.Join(", ", slowerRidgeFrames));
+        Assert.That(File.ReadAllText(oldPath), Is.EqualTo(oldRecord));
+        Assert.That(File.Exists(currentPath), Is.True);
+
+        yield return PressPad(GamepadButton.South);
+        yield return new WaitUntil(() => trial.Rules.Elapsed > 0.65);
+        Transform ghost = trial.transform.Find(circuit.Name + "/Personal best ghost");
+        Assert.That(ghost.gameObject.activeSelf, Is.True);
+        Assert.That(ghost.position.x, Is.GreaterThan(circuit.Start.x + 0.2f));
+        yield return DriveLap(true, 1, stopOnRoute: true);
+        Assert.That(trial.Rules.LastGate, Is.EqualTo(2));
+        yield return PressPad(GamepadButton.North);
+        yield return new WaitForFixedUpdate();
+        Assert.That(trial.KartBody.position.z, Is.EqualTo(circuit.Respawn(2).Position.z).Within(0.1f));
+
+        yield return LoadScene(TimeTrial.MenuScenePath);
+        GameObject.Find("Cup").GetComponent<Button>().onClick.Invoke();
+        GameObject.Find(TrialHud.QuickRaceName(circuit)).GetComponent<Button>().onClick.Invoke();
+        Assert.That(trial.Circuit, Is.SameAs(circuit));
+        Assert.That(trial.ItemsEnabled, Is.True);
+        Assert.That(trial.PlayerKarts.Length + trial.AiRivals.Count, Is.EqualTo(10));
+        Physics.SyncTransforms();
+        foreach (Checkpoint gate in RelayBoostPickups.GatesFor(circuit))
+        {
+            Assert.That(Physics.Raycast(gate.Center + Vector3.up * 2f, Vector3.down, out RaycastHit surface, 4f, 1), Is.True);
+            Vector3 kartHeight = surface.point + Vector3.up * 0.5f;
+            Assert.That(RelayBoostPickups.Crossed(gate, kartHeight - gate.Forward, kartHeight + gate.Forward), Is.True,
+                $"The road crossing at {gate.Center} must pick up the item.");
+        }
+        yield return new WaitUntil(() => trial.Rules.Phase == TrialPhase.Racing);
+        bool collected = false;
+        yield return DriveLap(false, 1, observe: () => collected |= trial.PlayerKart.HeldItem != RaceItem.None);
+        Assert.That(collected, Is.True);
+        // Park off the racing line after the player lap so an idle kart cannot block the AI finish.
+        Vector3 parking = circuit.Start + Vector3.back * 4f;
+        trial.PlayerKart.Place(parking, circuit.StartForward);
+        trial.Rules.Rebase(parking);
+        TrialRival firstFinisher = null;
+        while (firstFinisher == null && trial.Rules.Elapsed < 220)
+        {
+            foreach (TrialRival rival in trial.AiRivals)
+                if (rival.Rules.Phase == TrialPhase.Finished)
+                {
+                    firstFinisher = rival;
+                    break;
+                }
+            if (firstFinisher == null) yield return new WaitForFixedUpdate();
+        }
+        Assert.That(firstFinisher, Is.Not.Null, "An AI racer must finish the ten-racer Quick Race.");
+        Debug.Log($"{circuit.Name} first AI finished in {firstFinisher.Rules.Elapsed:F2}s with {firstFinisher.Recoveries} recoveries.");
+    }
+
     /// <summary>Follows course waypoints with stick and triggers while the real kart handles collisions.</summary>
     private IEnumerator DriveLap(bool shortcut, int lap, bool stopOnRoute = false, System.Action observe = null,
         bool useRelayBoost = false)
@@ -1623,6 +1737,10 @@ public sealed class TimeTrialPlayTests
         Vector3[] line = TrialCourse.DrivingLine(trial.Circuit, shortcut);
         bool docks = trial.Circuit == CourseDefinition.Docks;
         bool rustrail = trial.Circuit == CourseDefinition.Rustrail;
+        bool revised = trial.Circuit.Revision == 2;
+        if (revised)
+            for (int i = 0; i < line.Length; i++)
+                line[i].y = 0;
         bool alignRustrail = rustrail && (shortcut || lap == 1);
         double departure = shortcut ? 8.25 : 15.2;
         bool aligned = false;
@@ -1631,7 +1749,7 @@ public sealed class TimeTrialPlayTests
         bool usedRoute = false;
         bool itemButtonHeld = false;
         float waterfrontSpeed = 0f;
-        double cutoff = trial.Rules.Elapsed + (rustrail ? 90 : docks ? 65 : 47);
+        double cutoff = trial.Rules.Elapsed + (rustrail ? 90 : docks || revised ? 65 : 47);
         while (trial.Rules.Laps < lap && trial.Rules.Elapsed < cutoff)
         {
             observe?.Invoke();
@@ -1687,6 +1805,9 @@ public sealed class TimeTrialPlayTests
             if (waterfront)
                 waterfrontSpeed = Mathf.Max(waterfrontSpeed, speed);
             float desiredSpeed = Mathf.Lerp(waterfront ? 25f : 14f, 6f, Mathf.Abs(angle) / 37f);
+            if (trial.Circuit == CourseDefinition.CyberGrave && trial.Rules.LastGate == 2 &&
+                position.x < -64 && position.z is > 13 and < 28)
+                desiredSpeed = Mathf.Min(desiredSpeed, 11.5f); // Use the same braking entry on both lines.
             var drive = new GamepadState
             {
                 leftStick = new Vector2(Mathf.Clamp(angle / 33f, -1, 1), 0),
@@ -1733,7 +1854,11 @@ public sealed class TimeTrialPlayTests
             }
             else if (position.z is < -8 and > -20)
             {
-                if (trial.Circuit == CourseDefinition.Viaduct)
+                if (trial.Circuit == CourseDefinition.CyberGrave)
+                    usedRoute |= trial.Rules.LastGate == 2 && (shortcut ? position.x < -76 : position.x is > -57 and < -43);
+                else if (trial.Circuit == CourseDefinition.ApexDescent)
+                    usedRoute |= trial.Rules.LastGate == 2 && (shortcut ? position.x is > -66 and < -52 : position.x < -83);
+                else if (trial.Circuit == CourseDefinition.Viaduct)
                     usedRoute |= shortcut ? position.x is > -54 and < -44 : position.x < -61;
                 else
                     usedRoute |= shortcut ? position.x is > -51 and < -39 : position.x < -54;
